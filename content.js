@@ -33,17 +33,34 @@ const KEYWORD_GROUPS = {
   degree: {
     title: "Degree Requirements",
     keywords: [
+      // Bachelor
       /\bbachelor'?s?\b/i,
+      /\bbachelor\s+of\s+science\b/i,
+      /\bbachelor\s+of\s+arts\b/i,
       /\bundergraduate\b/i,
+      /\bbs\b/i,
+      /\bb\.s\.\b/i,
+      /\bba\b/i,
+      /\bb\.a\.\b/i,
+
+      // Master
       /\bmaster'?s?\b/i,
+      /\bmaster\s+of\s+science\b/i,
+      /\bmaster\s+of\s+arts\b/i,
       /\bgraduate\s+degree\b/i,
+      /\bms\b/i,
+      /\bm\.s\.\b/i,
+      /\bma\b/i,
+      /\bm\.a\.\b/i,
+      /\bmeng\b/i,
+      /\bm\.eng\.\b/i,
+      /\bmba\b/i,
+
+      // PhD / Doctoral
       /\bph\.?d\.?\b/i,
       /\bdoctorate\b/i,
       /\bdoctoral\b/i,
-      /\bbs\b/i,
-      /\bba\b/i,
-      /\bms\b/i,
-      /\bma\b/i
+      /\bdoctor\s+of\s+philosophy\b/i
     ]
   }
 };
@@ -155,7 +172,7 @@ function shouldSkipNode(node) {
 }
 
 function buildHighlightRegex() {
-  const phrases = [
+    const phrases = [
     "no sponsorship",
     "visa sponsorship",
     "work authorization",
@@ -169,20 +186,39 @@ function buildHighlightRegex() {
     "citizenship required",
     "permanent resident",
     "green card",
-    "bachelor",
-    "bachelor's",
-    "undergraduate",
-    "master",
-    "master's",
-    "phd",
-    "ph.d.",
-    "doctorate",
-    "doctoral",
     "opt",
     "cpt",
     "h-1b",
     "sponsor",
-    "sponsorship"
+    "sponsorship",
+
+    // degree terms
+    "bachelor of science",
+    "bachelor of arts",
+    "bachelor",
+    "bachelor's",
+    "undergraduate",
+    "bs",
+    "b.s.",
+    "ba",
+    "b.a.",
+    "master of science",
+    "master of arts",
+    "master",
+    "master's",
+    "graduate degree",
+    "ms",
+    "m.s.",
+    "ma",
+    "m.a.",
+    "meng",
+    "m.eng.",
+    "mba",
+    "doctor of philosophy",
+    "phd",
+    "ph.d.",
+    "doctorate",
+    "doctoral"
   ];
 
   const escaped = phrases
