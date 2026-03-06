@@ -1,0 +1,87 @@
+#job-filter-overlay {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2147483647;
+  width: 320px;
+  background: rgba(18, 18, 22, 0.96);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.28);
+  backdrop-filter: blur(8px);
+  padding: 12px;
+  font-family: Arial, sans-serif;
+}
+
+.jf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.jf-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.jf-close {
+  background: transparent;
+  color: #ddd;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.jf-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+.jf-label {
+  font-size: 13px;
+  color: #cfcfcf;
+  margin-bottom: 6px;
+}
+
+.jf-status {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.jf-hit {
+  background: rgba(255, 193, 7, 0.18);
+  color: #ffd54f;
+}
+
+.jf-miss {
+  background: rgba(76, 175, 80, 0.18);
+  color: #81c784;
+}
+
+.jf-tags {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.jf-tag {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  color: #eee;
+}
+
+mark.job-filter-highlight {
+  background: #ffeb3b;
+  color: #111;
+  padding: 0 2px;
+  border-radius: 2px;
+}
