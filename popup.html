@@ -2,59 +2,156 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>Job Filter</title>
+  <title>JobLens ATS</title>
   <style>
     body {
       font-family: Arial, sans-serif;
-      width: 280px;
+      width: 360px;
       padding: 14px;
       margin: 0;
+      background: #fff;
+      color: #111;
     }
+
     h1 {
-      font-size: 16px;
+      font-size: 18px;
       margin: 0 0 12px;
     }
+
+    .label {
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .input, .textarea {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 13px;
+    }
+
+    .textarea {
+      min-height: 72px;
+      resize: vertical;
+    }
+
     .row {
       display: flex;
       justify-content: space-between;
       align-items: center;
       margin: 10px 0;
+      gap: 10px;
     }
-    .meta {
+
+    .button {
+      width: 100%;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      background: #111;
+      color: #fff;
+    }
+
+    .button.secondary {
+      background: #f1f1f1;
+      color: #111;
+    }
+
+    .stack {
+      display: grid;
+      gap: 10px;
+    }
+
+    .block {
       margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid #ececec;
+    }
+
+    .meta {
       font-size: 12px;
       color: #555;
       line-height: 1.5;
     }
-    .block {
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px solid #e5e5e5;
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #f8f8f8;
+      border: 1px solid #ececec;
+      border-radius: 10px;
+      padding: 10px;
+      font-size: 12px;
+      max-height: 260px;
+      overflow: auto;
+    }
+
+    .small {
+      font-size: 11px;
+      color: #666;
     }
   </style>
 </head>
 <body>
-  <h1>Job Context Filter</h1>
+  <h1>JobLens ATS</h1>
 
-  <div class="row">
-    <span>Enable scanning</span>
-    <input type="checkbox" id="enabled" />
+  <div class="stack">
+    <div>
+      <div class="label">Gemini API Key</div>
+      <input id="apiKeyInput" class="input" type="password" placeholder="Paste your Gemini API key" />
+    </div>
+
+    <button id="saveApiKeyBtn" class="button secondary">Save API Key</button>
+
+    <div class="block">
+      <div class="label">Resume PDF</div>
+      <input id="resumePdf" type="file" accept="application/pdf" />
+      <div style="height: 10px;"></div>
+      <button id="parseResumeBtn" class="button">Upload & Parse Resume</button>
+    </div>
+
+    <div class="block">
+      <button id="matchBtn" class="button">Match With Current Job Page</button>
+    </div>
+
+    <div class="block">
+      <div class="row">
+        <span>Enable scanning</span>
+        <input type="checkbox" id="enabled" />
+      </div>
+
+      <div class="row">
+        <span>Show overlay</span>
+        <input type="checkbox" id="showOverlay" />
+      </div>
+
+      <div class="row">
+        <span>Highlight terms</span>
+        <input type="checkbox" id="highlightMatches" />
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="label">Status</div>
+      <div id="status" class="meta">Idle.</div>
+    </div>
+
+    <div class="block">
+      <div class="label">Last Result</div>
+      <pre id="output">No result yet.</pre>
+    </div>
+
+    <div class="small">
+      Development build. For production, move Gemini calls to your own backend proxy.
+    </div>
   </div>
 
-  <div class="row">
-    <span>Show page overlay</span>
-    <input type="checkbox" id="showOverlay" />
-  </div>
-
-  <div class="row">
-    <span>Highlight matched words</span>
-    <input type="checkbox" id="highlightMatches" />
-  </div>
-
-  <div class="block meta" id="lastScan">
-    No scan data yet.
-  </div>
-
-  <script src="popup.js"></script>
+  <script type="module" src="popup.js"></script>
 </body>
 </html>
