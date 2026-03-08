@@ -1,7 +1,7 @@
 import { uploadPdfToGemini, generateWithPdf, generateFromText, extractJsonText } from "./gemini.js";
 import { RESUME_PARSE_PROMPT, buildMatchPrompt } from "./prompts.js";
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(() => {
   const defaults = {
     enabled: true,
     highlightMatches: true,
@@ -9,11 +9,14 @@ chrome.runtime.onInstalled.addListener(async () => {
     autoRescanMs: 1200
   };
 
-  chrome.storage.sync.get(Object.keys(defaults), (result) => {
-    const merged = {};
-    for (const [k, v] of Object.entries(defaults)) {
-      merged[k] = result[k] ?? v;
-    }
+  chrome.storage.sync.get(null, (result) => {
+    const merged = {
+      enabled: result.enabled ?? defaults.enabled,
+      highlightMatches: result.highlightMatches ?? defaults.highlightMatches,
+      showOverlay: result.showOverlay ?? defaults.showOverlay,
+      autoRescanMs: result.autoRescanMs ?? defaults.autoRescanMs
+    };
+
     chrome.storage.sync.set(merged);
   });
 });
@@ -54,9 +57,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         case "MATCH_CURRENT_JOB": {
-          const { pageText } = message.payload;
+          const { pageText, pageUrl, pageTitle } = message.payload;
 
-          const localData = await chrome.storage.local.get(["parsedResume"]);
+          const localData = await chrome.storage.local.get(["parsedResume", "atsResultsByUrl"]);
           if (!localData.parsedResume) {
             throw new Error("No parsed resume found. Please upload and parse a PDF first.");
           }
@@ -70,15 +73,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const matchText = extractJsonText(matchResponse);
           const matchResult = JSON.parse(matchText);
 
+          const atsResultsByUrl = localData.atsResultsByUrl || {};
+          if (pageUrl) {
+            atsResultsByUrl[pageUrl] = {
+              url: pageUrl,
+              title: pageTitle || "",
+              matchedAt: new Date().toISOString(),
+              result: matchResult
+            };
+          }
+
           await chrome.storage.local.set({
-            lastMatchResult: matchResult,
+            atsResultsByUrl,
             lastMatchAt: new Date().toISOString()
           });
 
           if (sender.tab?.id) {
             chrome.tabs.sendMessage(sender.tab.id, {
               type: "ATS_MATCH_RESULT_UPDATED",
-              payload: { matchResult }
+              payload: {
+                pageUrl,
+                matchResult
+              }
             });
           }
 
@@ -90,15 +106,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         case "GET_STORED_DATA": {
+          const { pageUrl } = message.payload || {};
+
           const data = await chrome.storage.local.get([
             "parsedResume",
             "parsedResumeAt",
-            "lastMatchResult",
-            "lastMatchAt",
             "uploadedResumeFile",
-            "lastScan"
+            "lastScan",
+            "atsResultsByUrl"
           ]);
-          sendResponse({ ok: true, data });
+
+          let currentPageMatchResult = null;
+          if (pageUrl && data.atsResultsByUrl && data.atsResultsByUrl[pageUrl]) {
+            currentPageMatchResult = data.atsResultsByUrl[pageUrl].result;
+          }
+
+          sendResponse({
+            ok: true,
+            data: {
+              parsedResume: data.parsedResume || null,
+              parsedResumeAt: data.parsedResumeAt || null,
+              uploadedResumeFile: data.uploadedResumeFile || null,
+              lastScan: data.lastScan || null,
+              currentPageMatchResult
+            }
+          });
           break;
         }
 

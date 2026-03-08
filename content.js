@@ -68,10 +68,14 @@ let mutationDebounce = null;
 let latestMatchResult = null;
 
 /**
- * Problem 1 fix:
- * If user closes the overlay, do not recreate it again on the same page session.
+ * Problem 1:
+ * User closes overlay => do not auto-popup again on same page session.
  */
 let overlayDismissedForThisPage = false;
+
+function getCurrentPageUrl() {
+  return location.href;
+}
 
 function getPageText() {
   const bodyText = document.body?.innerText || "";
@@ -124,13 +128,6 @@ function removeOverlay() {
 function dismissOverlayForCurrentPage() {
   overlayDismissedForThisPage = true;
   removeOverlay();
-}
-
-function maybeResetDismissStateForNavigation() {
-  /**
-   * Reserved for future use if we want smarter SPA route handling.
-   * For now, a fresh content script load on a new page resets the state naturally.
-   */
 }
 
 function renderOverlay(scanResults, matchResult = latestMatchResult) {
@@ -299,7 +296,7 @@ function buildHighlightRegex() {
 
   const escaped = phrases
     .sort((a, b) => b.length - a.length)
-    .map(p => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 
   return new RegExp(`\\b(?:${escaped.join("|")})\\b`, "gi");
 }
@@ -351,14 +348,11 @@ function highlightMatchesInDom() {
 async function scanPage() {
   if (!currentConfig.enabled) return;
 
-  maybeResetDismissStateForNavigation();
-
   const text = getPageText();
   if (!text) return;
 
   const results = collectMatches(text);
 
-  // still update stored scan result even if overlay is dismissed
   chrome.storage.local.set({
     lastScan: {
       url: location.href,
@@ -368,10 +362,7 @@ async function scanPage() {
     }
   });
 
-  // highlighting can still work even when overlay is dismissed
   highlightMatchesInDom();
-
-  // only render if not dismissed
   renderOverlay(results, latestMatchResult);
 }
 
@@ -405,8 +396,10 @@ async function loadConfig() {
 
 async function loadStoredMatch() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(["lastMatchResult"], (data) => {
-      latestMatchResult = data.lastMatchResult || null;
+    chrome.storage.local.get(["atsResultsByUrl"], (data) => {
+      const currentUrl = getCurrentPageUrl();
+      const map = data.atsResultsByUrl || {};
+      latestMatchResult = map[currentUrl]?.result || null;
       resolve();
     });
   });
@@ -427,23 +420,27 @@ chrome.storage.onChanged.addListener((changes, area) => {
     }
 
     if (changes.showOverlay && changes.showOverlay.newValue === true) {
-      // if user explicitly re-enables overlay in settings, allow it to show again
       overlayDismissedForThisPage = false;
     }
 
     if (changed) scheduleScan();
   }
 
-  if (area === "local" && changes.lastMatchResult) {
-    latestMatchResult = changes.lastMatchResult.newValue || null;
+  if (area === "local" && changes.atsResultsByUrl) {
+    const currentUrl = getCurrentPageUrl();
+    const newMap = changes.atsResultsByUrl.newValue || {};
+    latestMatchResult = newMap[currentUrl]?.result || null;
     scheduleScan();
   }
 });
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === "ATS_MATCH_RESULT_UPDATED") {
-    latestMatchResult = message.payload?.matchResult || null;
-    scheduleScan();
+    const payloadUrl = message.payload?.pageUrl || "";
+    if (payloadUrl === getCurrentPageUrl()) {
+      latestMatchResult = message.payload?.matchResult || null;
+      scheduleScan();
+    }
   }
 
   if (message.type === "RESET_PAGE_OVERLAY_DISMISS") {

@@ -15,12 +15,6 @@ const enabledEl = document.getElementById("enabled");
 const highlightEl = document.getElementById("highlightMatches");
 const overlayEl = document.getElementById("showOverlay");
 
-async function getActiveTab() {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tabs.length) throw new Error("No active tab found.");
-  return tabs[0];
-}
-
 function setStatus(text) {
   statusBox.textContent = text;
 }
@@ -46,43 +40,109 @@ function fileToBase64(file) {
   });
 }
 
-async function saveSetting(key, value) {
-  await chrome.storage.sync.set({ [key]: value });
+function getActiveTab() {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      if (!tabs || !tabs.length) {
+        reject(new Error("No active tab found."));
+        return;
+      }
+      resolve(tabs[0]);
+    });
+  });
 }
 
-async function loadSettings() {
-  const sync = await chrome.storage.sync.get({
-    ...DEFAULT_CONFIG,
-    geminiApiKey: ""
+function saveSetting(key, value) {
+  chrome.storage.sync.set({ [key]: value }, () => {
+    if (chrome.runtime.lastError) {
+      setStatus("Failed to save setting: " + chrome.runtime.lastError.message);
+      return;
+    }
+    setStatus(`Saved ${key}.`);
   });
+}
 
-  enabledEl.checked = sync.enabled;
-  highlightEl.checked = sync.highlightMatches;
-  overlayEl.checked = sync.showOverlay;
-  apiKeyInput.value = sync.geminiApiKey || "";
+function loadSettings() {
+  chrome.storage.sync.get(
+    {
+      ...DEFAULT_CONFIG,
+      geminiApiKey: ""
+    },
+    (sync) => {
+      if (chrome.runtime.lastError) {
+        setStatus("Failed to load settings: " + chrome.runtime.lastError.message);
+        return;
+      }
+
+      enabledEl.checked = !!sync.enabled;
+      highlightEl.checked = !!sync.highlightMatches;
+      overlayEl.checked = !!sync.showOverlay;
+      apiKeyInput.value = sync.geminiApiKey || "";
+    }
+  );
 }
 
 async function loadStoredData() {
-  const response = await chrome.runtime.sendMessage({ type: "GET_STORED_DATA" });
-  if (!response?.ok) return;
+  try {
+    const tab = await getActiveTab();
+    chrome.runtime.sendMessage(
+      {
+        type: "GET_STORED_DATA",
+        payload: {
+          pageUrl: tab.url || ""
+        }
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          setStatus("Failed to load stored data: " + chrome.runtime.lastError.message);
+          return;
+        }
 
-  const data = response.data || {};
-  if (data.lastMatchResult) {
-    setOutput(data.lastMatchResult);
-  } else if (data.parsedResume) {
-    setOutput(data.parsedResume);
+        if (!response || !response.ok) {
+          return;
+        }
+
+        const data = response.data || {};
+        if (data.currentPageMatchResult) {
+          setOutput(data.currentPageMatchResult);
+        } else if (data.parsedResume) {
+          setOutput(data.parsedResume);
+        } else {
+          setOutput("No result yet.");
+        }
+      }
+    );
+  } catch (error) {
+    setStatus("Failed to load stored data.");
   }
 }
 
-saveApiKeyBtn.addEventListener("click", async () => {
+saveApiKeyBtn.addEventListener("click", () => {
   const key = apiKeyInput.value.trim();
-  await chrome.storage.sync.set({ geminiApiKey: key });
-  setStatus(key ? "Gemini API key saved." : "Gemini API key cleared.");
+  chrome.storage.sync.set({ geminiApiKey: key }, () => {
+    if (chrome.runtime.lastError) {
+      setStatus("Failed to save API key: " + chrome.runtime.lastError.message);
+      return;
+    }
+    setStatus(key ? "Gemini API key saved." : "Gemini API key cleared.");
+  });
 });
 
-enabledEl.addEventListener("change", (e) => saveSetting("enabled", e.target.checked));
-highlightEl.addEventListener("change", (e) => saveSetting("highlightMatches", e.target.checked));
-overlayEl.addEventListener("change", (e) => saveSetting("showOverlay", e.target.checked));
+enabledEl.addEventListener("change", (e) => {
+  saveSetting("enabled", e.target.checked);
+});
+
+highlightEl.addEventListener("change", (e) => {
+  saveSetting("highlightMatches", e.target.checked);
+});
+
+overlayEl.addEventListener("change", (e) => {
+  saveSetting("showOverlay", e.target.checked);
+});
 
 parseResumeBtn.addEventListener("click", async () => {
   try {
@@ -93,21 +153,32 @@ parseResumeBtn.addEventListener("click", async () => {
     const base64 = await fileToBase64(file);
 
     setStatus("Uploading PDF to Gemini and parsing resume...");
-    const response = await chrome.runtime.sendMessage({
-      type: "PARSE_RESUME_PDF",
-      payload: {
-        fileName: file.name,
-        mimeType: file.type || "application/pdf",
-        fileDataBase64: base64
+    chrome.runtime.sendMessage(
+      {
+        type: "PARSE_RESUME_PDF",
+        payload: {
+          fileName: file.name,
+          mimeType: file.type || "application/pdf",
+          fileDataBase64: base64
+        }
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          setStatus("Error.");
+          setOutput(chrome.runtime.lastError.message);
+          return;
+        }
+
+        if (!response || !response.ok) {
+          setStatus("Error.");
+          setOutput(response?.error || "Resume parsing failed.");
+          return;
+        }
+
+        setStatus("Resume parsed successfully.");
+        setOutput(response.parsedResume);
       }
-    });
-
-    if (!response?.ok) {
-      throw new Error(response?.error || "Resume parsing failed.");
-    }
-
-    setStatus("Resume parsed successfully.");
-    setOutput(response.parsedResume);
+    );
   } catch (error) {
     setStatus("Error.");
     setOutput(String(error));
@@ -119,32 +190,56 @@ matchBtn.addEventListener("click", async () => {
     const tab = await getActiveTab();
 
     setStatus("Reading current page...");
-    const [{ result: pageText }] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => document.body?.innerText || ""
-    });
+    chrome.scripting.executeScript(
+      {
+        target: { tabId: tab.id },
+        func: () => document.body?.innerText || ""
+      },
+      (results) => {
+        if (chrome.runtime.lastError) {
+          setStatus("Error.");
+          setOutput(chrome.runtime.lastError.message);
+          return;
+        }
 
-    setStatus("Matching resume against job page...");
-    const response = await chrome.runtime.sendMessage({
-      type: "MATCH_CURRENT_JOB",
-      payload: {
-        pageText
+        const pageText = results?.[0]?.result || "";
+
+        setStatus("Matching resume against job page...");
+        chrome.runtime.sendMessage(
+          {
+            type: "MATCH_CURRENT_JOB",
+            payload: {
+              pageText,
+              pageUrl: tab.url || "",
+              pageTitle: tab.title || ""
+            }
+          },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              setStatus("Error.");
+              setOutput(chrome.runtime.lastError.message);
+              return;
+            }
+
+            if (!response || !response.ok) {
+              setStatus("Error.");
+              setOutput(response?.error || "Matching failed.");
+              return;
+            }
+
+            setStatus("Match complete.");
+            setOutput(response.matchResult);
+          }
+        );
       }
-    });
-
-    if (!response?.ok) {
-      throw new Error(response?.error || "Matching failed.");
-    }
-
-    setStatus("Match complete.");
-    setOutput(response.matchResult);
+    );
   } catch (error) {
     setStatus("Error.");
     setOutput(String(error));
   }
 });
 
-(async function init() {
-  await loadSettings();
-  await loadStoredData();
-})();
+document.addEventListener("DOMContentLoaded", () => {
+  loadSettings();
+  loadStoredData();
+});
