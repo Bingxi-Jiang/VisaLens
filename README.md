@@ -34,8 +34,9 @@ So instead of doing `Ctrl + F` over and over for every possible wording, I built
 - 🛂 Detects sponsorship / work authorization language
 - 🎓 Detects degree requirements and deeper education eligibility signals
 - 📄 Parses resume PDFs with Gemini
+- 🗂️ Saves multiple resume profiles and lets you switch the active profile instantly
 - 📊 Generates ATS-style match results
-- 🧠 Saves match history by job URL
+- 🧠 Saves ATS history per active resume profile so different resume versions stay separate
 - 💡 Highlights important signals directly on the page
 - 🧾 Surfaces extra education details such as “currently pursuing”, “completed degree”, graduation timing, and year-of-study requirements when present
 - 🎯 Auto-detects likely job/application pages
@@ -56,6 +57,26 @@ When a posting includes additional education eligibility language, the overlay c
 - academic standing phrasing such as rising junior or senior standing
 
 These appear in the Degree section as extra education details when present on the page.
+
+---
+
+## 🗂️ Multi-resume profiles
+
+VisaLens now supports **multiple saved resume profiles** instead of a single uploaded resume.
+
+That means you can keep separate versions such as:
+
+- SWE Resume
+- MLE Resume
+- Research Resume
+
+and switch the **active profile** in the Profile tab before running ATS comparison.
+
+What this changes:
+
+- no need to re-upload and re-parse the same resume every time you switch targets
+- ATS matching always uses the currently selected profile
+- ATS history and stored results stay scoped to the active profile, so SWE and MLE applications do not overwrite each other
 
 ---
 
@@ -142,9 +163,10 @@ Then:
 
 1. Open a job page on Greenhouse / Lever / Workday / a careers site
 2. If the page is confidently detected, VisaLens opens automatically
-3. Upload your resume PDF once in the **Profile** tab
-4. Click **Match This Page** to generate ATS-style feedback
-5. On a page that is not auto-detected, click the extension icon to open VisaLens manually
+3. In the **Profile** tab, upload one or more resume PDFs and save them as profiles like **SWE Resume** or **MLE Resume**
+4. Select which saved profile should be your active profile
+5. Click **Match This Page** to generate ATS-style feedback using that active profile
+6. On a page that is not auto-detected, click the extension icon to open VisaLens manually
 
 ---
 
@@ -165,6 +187,7 @@ VisaLens is especially useful for:
 - stronger support for LinkedIn / custom careers pages
 - employer-level sponsorship memory
 - per-domain “always auto-open” preferences
+- optional profile rename / duplicate / export actions
 - exportable job tracking
 - autofill and application workflow helpers
 

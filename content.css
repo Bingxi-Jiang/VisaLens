@@ -377,3 +377,79 @@ mark.job-filter-highlight {
   border-radius: 10px;
   padding: 8px 10px;
 }
+
+
+.jf-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.jf-button.danger {
+  border-color: rgba(244, 67, 54, 0.35);
+  color: #ffb3b3;
+}
+
+.jf-input-help {
+  margin-top: 6px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #cfcfcf;
+}
+
+.jf-profile-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.jf-profile-card {
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.04);
+  padding: 12px;
+}
+
+.jf-profile-card.active {
+  border-color: rgba(255,255,255,0.22);
+  background: rgba(255,255,255,0.07);
+}
+
+.jf-profile-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.jf-profile-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.jf-profile-card-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #cfcfcf;
+}
+
+.jf-inline-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  background: #fff;
+  color: #111;
+}
+
+.jf-profile-button-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}

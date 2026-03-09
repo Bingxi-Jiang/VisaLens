@@ -9,7 +9,7 @@ chrome.runtime.onInstalled.addListener(() => {
     autoRescanMs: 1200
   };
 
-  chrome.storage.sync.get(null, (result) => {
+  chrome.storage.sync.get(null, async (result) => {
     const merged = {
       enabled: result.enabled ?? defaults.enabled,
       highlightMatches: result.highlightMatches ?? defaults.highlightMatches,
@@ -18,6 +18,7 @@ chrome.runtime.onInstalled.addListener(() => {
     };
 
     chrome.storage.sync.set(merged);
+    await ensureResumeProfileStorage();
   });
 });
 
@@ -36,7 +37,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       switch (message.type) {
         case "PARSE_RESUME_PDF": {
-          const { fileName, mimeType, fileDataBase64 } = message.payload;
+          const { fileName, mimeType, fileDataBase64, profileLabel } = message.payload;
           const blob = base64ToBlob(fileDataBase64, mimeType || "application/pdf");
           const file = new File([blob], fileName || "resume.pdf", {
             type: mimeType || "application/pdf"
@@ -51,36 +52,108 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
           const parsedText = extractJsonText(parsedResponse);
           const parsedResume = JSON.parse(parsedText);
+          const state = await ensureResumeProfileStorage();
+
+          const parsedAt = new Date().toISOString();
+          const desiredLabel = buildProfileLabel(profileLabel, fileName, parsedResume);
+          const label = uniquifyProfileLabel(desiredLabel, state.resumeProfiles);
+          const newProfile = {
+            id: createResumeProfileId(),
+            label,
+            fileName: fileName || "resume.pdf",
+            parsedAt,
+            uploadedResumeFile: uploadedFile,
+            parsedResume
+          };
+
+          const resumeProfiles = [newProfile, ...state.resumeProfiles];
+          const activeResumeProfileId = newProfile.id;
 
           await chrome.storage.local.set({
-            uploadedResumeFile: uploadedFile,
+            resumeProfiles,
+            activeResumeProfileId,
             parsedResume,
-            parsedResumeAt: new Date().toISOString()
+            parsedResumeAt: parsedAt,
+            uploadedResumeFile: uploadedFile
           });
 
           sendResponse({
             ok: true,
             uploadedFile,
-            parsedResume
+            parsedResume,
+            profile: newProfile,
+            resumeProfiles,
+            activeResumeProfileId
+          });
+          break;
+        }
+
+        case "SET_ACTIVE_RESUME_PROFILE": {
+          const { profileId } = message.payload || {};
+          const state = await ensureResumeProfileStorage();
+          const activeProfile = state.resumeProfiles.find((profile) => profile.id === profileId);
+          if (!activeProfile) throw new Error("Resume profile not found.");
+
+          await chrome.storage.local.set({
+            activeResumeProfileId: activeProfile.id,
+            parsedResume: activeProfile.parsedResume || null,
+            parsedResumeAt: activeProfile.parsedAt || null,
+            uploadedResumeFile: activeProfile.uploadedResumeFile || null
+          });
+
+          sendResponse({
+            ok: true,
+            activeResumeProfileId: activeProfile.id,
+            activeProfile,
+            resumeProfiles: state.resumeProfiles
+          });
+          break;
+        }
+
+        case "DELETE_RESUME_PROFILE": {
+          const { profileId } = message.payload || {};
+          const state = await ensureResumeProfileStorage();
+          const profileExists = state.resumeProfiles.some((profile) => profile.id === profileId);
+          if (!profileExists) throw new Error("Resume profile not found.");
+
+          const resumeProfiles = state.resumeProfiles.filter((profile) => profile.id !== profileId);
+          const atsResultsByProfileUrl = { ...(state.atsResultsByProfileUrl || {}) };
+          delete atsResultsByProfileUrl[profileId];
+
+          const atsHistory = (state.atsHistory || []).filter((entry) => entry.profileId !== profileId);
+          const nextActiveProfile = resumeProfiles.find((profile) => profile.id === state.activeResumeProfileId) || resumeProfiles[0] || null;
+
+          await chrome.storage.local.set({
+            resumeProfiles,
+            activeResumeProfileId: nextActiveProfile?.id || null,
+            parsedResume: nextActiveProfile?.parsedResume || null,
+            parsedResumeAt: nextActiveProfile?.parsedAt || null,
+            uploadedResumeFile: nextActiveProfile?.uploadedResumeFile || null,
+            atsResultsByProfileUrl,
+            atsHistory
+          });
+
+          sendResponse({
+            ok: true,
+            resumeProfiles,
+            activeResumeProfileId: nextActiveProfile?.id || null,
+            activeProfile: nextActiveProfile,
+            atsHistory
           });
           break;
         }
 
         case "MATCH_CURRENT_JOB": {
           const { pageText, pageUrl, pageTitle, scanResults } = message.payload;
+          const state = await ensureResumeProfileStorage();
+          const activeProfile = state.activeProfile;
 
-          const localData = await chrome.storage.local.get([
-            "parsedResume",
-            "atsResultsByUrl",
-            "atsHistory"
-          ]);
-
-          if (!localData.parsedResume) {
-            throw new Error("No parsed resume found. Please upload and parse a PDF first.");
+          if (!activeProfile?.parsedResume) {
+            throw new Error("No active resume profile found. Please upload or select a resume profile first.");
           }
 
           const prompt = buildMatchPrompt(
-            localData.parsedResume,
+            activeProfile.parsedResume,
             String(pageText || "").slice(0, 120000)
           );
 
@@ -88,40 +161,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const matchText = extractJsonText(matchResponse);
           const matchResult = JSON.parse(matchText);
 
-          const atsResultsByUrl = localData.atsResultsByUrl || {};
+          const matchedAt = new Date().toISOString();
+          const atsResultsByProfileUrl = { ...(state.atsResultsByProfileUrl || {}) };
+          const existingProfileMap = { ...(atsResultsByProfileUrl[activeProfile.id] || {}) };
+
           if (pageUrl) {
-            atsResultsByUrl[pageUrl] = {
+            existingProfileMap[pageUrl] = {
               url: pageUrl,
               title: pageTitle || "",
-              matchedAt: new Date().toISOString(),
+              matchedAt,
+              profileId: activeProfile.id,
+              profileLabel: activeProfile.label,
               result: matchResult,
               scanResults: scanResults || null
             };
+            atsResultsByProfileUrl[activeProfile.id] = existingProfileMap;
           }
 
-          const atsHistory = Array.isArray(localData.atsHistory) ? localData.atsHistory : [];
+          const atsHistory = Array.isArray(state.atsHistory) ? [...state.atsHistory] : [];
           if (pageUrl) {
             const newEntry = {
               url: pageUrl,
               title: pageTitle || "",
-              matchedAt: new Date().toISOString(),
+              matchedAt,
+              profileId: activeProfile.id,
+              profileLabel: activeProfile.label,
               result: matchResult,
               scanResults: scanResults || null
             };
 
-            const filtered = atsHistory.filter((item) => item.url !== pageUrl);
+            const filtered = atsHistory.filter((item) => !(item.url === pageUrl && item.profileId === activeProfile.id));
             filtered.unshift(newEntry);
-            const trimmed = filtered.slice(0, 500);
 
             await chrome.storage.local.set({
-              atsResultsByUrl,
-              atsHistory: trimmed,
-              lastMatchAt: new Date().toISOString()
+              atsResultsByProfileUrl,
+              atsHistory: filtered.slice(0, 500),
+              lastMatchAt: matchedAt
             });
           } else {
             await chrome.storage.local.set({
-              atsResultsByUrl,
-              lastMatchAt: new Date().toISOString()
+              atsResultsByProfileUrl,
+              lastMatchAt: matchedAt
             });
           }
 
@@ -130,6 +210,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               type: "ATS_MATCH_RESULT_UPDATED",
               payload: {
                 pageUrl,
+                profileId: activeProfile.id,
                 matchResult
               }
             });
@@ -137,6 +218,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
           sendResponse({
             ok: true,
+            profileId: activeProfile.id,
+            profileLabel: activeProfile.label,
             matchResult
           });
           break;
@@ -144,29 +227,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case "GET_STORED_DATA": {
           const { pageUrl } = message.payload || {};
-
-          const data = await chrome.storage.local.get([
-            "parsedResume",
-            "parsedResumeAt",
-            "uploadedResumeFile",
-            "lastScan",
-            "atsResultsByUrl",
-            "atsHistory"
-          ]);
-
-          let currentPageMatchResult = null;
-          if (pageUrl && data.atsResultsByUrl && data.atsResultsByUrl[pageUrl]) {
-            currentPageMatchResult = data.atsResultsByUrl[pageUrl].result;
-          }
+          const state = await ensureResumeProfileStorage();
+          const profileMap = state.activeProfile?.id ? state.atsResultsByProfileUrl?.[state.activeProfile.id] || {} : {};
+          const currentPageMatchResult = pageUrl ? profileMap[pageUrl]?.result || null : null;
 
           sendResponse({
             ok: true,
             data: {
-              parsedResume: data.parsedResume || null,
-              parsedResumeAt: data.parsedResumeAt || null,
-              uploadedResumeFile: data.uploadedResumeFile || null,
-              lastScan: data.lastScan || null,
-              atsHistory: data.atsHistory || [],
+              parsedResume: state.activeProfile?.parsedResume || null,
+              parsedResumeAt: state.activeProfile?.parsedAt || null,
+              uploadedResumeFile: state.activeProfile?.uploadedResumeFile || null,
+              resumeProfiles: state.resumeProfiles,
+              activeResumeProfileId: state.activeResumeProfileId,
+              activeResumeProfile: state.activeProfile || null,
+              lastScan: null,
+              atsHistory: filterHistoryForActiveProfile(state.atsHistory, state.activeResumeProfileId),
               currentPageMatchResult
             }
           });
@@ -174,9 +249,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         case "SUMMARIZE_ATS_HISTORY": {
-          const data = await chrome.storage.local.get(["atsHistory"]);
-          const atsHistory = Array.isArray(data.atsHistory) ? data.atsHistory : [];
-          const summary = summarizeAtsHistory(atsHistory);
+          const state = await ensureResumeProfileStorage();
+          const filteredHistory = filterHistoryForActiveProfile(state.atsHistory, state.activeResumeProfileId);
+          const summary = summarizeAtsHistory(filteredHistory, state.activeProfile?.label || "current profile");
 
           sendResponse({ ok: true, summary });
           break;
@@ -196,6 +271,123 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
+function createResumeProfileId() {
+  return `resume_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildProfileLabel(profileLabel, fileName, parsedResume) {
+  const trimmed = String(profileLabel || "").trim();
+  if (trimmed) return trimmed;
+
+  const fileStem = String(fileName || "resume.pdf").replace(/\.pdf$/i, "").trim();
+  if (fileStem) return fileStem;
+
+  const candidateName = String(parsedResume?.name || "").trim();
+  if (candidateName) return `${candidateName} Resume`;
+
+  return "Resume Profile";
+}
+
+function uniquifyProfileLabel(label, existingProfiles) {
+  const used = new Set((existingProfiles || []).map((profile) => String(profile.label || "").toLowerCase()));
+  if (!used.has(label.toLowerCase())) return label;
+
+  let counter = 2;
+  let candidate = `${label} (${counter})`;
+  while (used.has(candidate.toLowerCase())) {
+    counter += 1;
+    candidate = `${label} (${counter})`;
+  }
+  return candidate;
+}
+
+function inferLegacyProfileLabel(parsedResume, uploadedResumeFile) {
+  const candidateName = String(parsedResume?.name || "").trim();
+  const fileName = String(uploadedResumeFile?.displayName || uploadedResumeFile?.name || "").replace(/\.pdf$/i, "").trim();
+  if (fileName) return fileName;
+  if (candidateName) return `${candidateName} Resume`;
+  return "Imported Resume";
+}
+
+function filterHistoryForActiveProfile(history, activeResumeProfileId) {
+  const all = Array.isArray(history) ? history : [];
+  if (!activeResumeProfileId) return all;
+  return all.filter((entry) => entry.profileId === activeResumeProfileId);
+}
+
+async function ensureResumeProfileStorage() {
+  const data = await chrome.storage.local.get([
+    "resumeProfiles",
+    "activeResumeProfileId",
+    "parsedResume",
+    "parsedResumeAt",
+    "uploadedResumeFile",
+    "atsResultsByUrl",
+    "atsResultsByProfileUrl",
+    "atsHistory"
+  ]);
+
+  let resumeProfiles = Array.isArray(data.resumeProfiles) ? data.resumeProfiles.filter(Boolean) : [];
+  let activeResumeProfileId = data.activeResumeProfileId || null;
+  let atsResultsByProfileUrl = data.atsResultsByProfileUrl && typeof data.atsResultsByProfileUrl === "object"
+    ? { ...data.atsResultsByProfileUrl }
+    : {};
+  let atsHistory = Array.isArray(data.atsHistory) ? [...data.atsHistory] : [];
+  let changed = false;
+
+  if (!resumeProfiles.length && data.parsedResume) {
+    const legacyProfile = {
+      id: createResumeProfileId(),
+      label: inferLegacyProfileLabel(data.parsedResume, data.uploadedResumeFile),
+      fileName: data.uploadedResumeFile?.displayName || data.uploadedResumeFile?.name || "resume.pdf",
+      parsedAt: data.parsedResumeAt || new Date().toISOString(),
+      uploadedResumeFile: data.uploadedResumeFile || null,
+      parsedResume: data.parsedResume
+    };
+
+    resumeProfiles = [legacyProfile];
+    activeResumeProfileId = legacyProfile.id;
+    changed = true;
+
+    if (data.atsResultsByUrl && typeof data.atsResultsByUrl === "object" && Object.keys(data.atsResultsByUrl).length) {
+      atsResultsByProfileUrl[legacyProfile.id] = data.atsResultsByUrl;
+    }
+
+    atsHistory = atsHistory.map((entry) => ({
+      ...entry,
+      profileId: entry.profileId || legacyProfile.id,
+      profileLabel: entry.profileLabel || legacyProfile.label
+    }));
+  }
+
+  if (resumeProfiles.length && (!activeResumeProfileId || !resumeProfiles.some((profile) => profile.id === activeResumeProfileId))) {
+    activeResumeProfileId = resumeProfiles[0].id;
+    changed = true;
+  }
+
+  const activeProfile = resumeProfiles.find((profile) => profile.id === activeResumeProfileId) || null;
+
+  if (changed) {
+    await chrome.storage.local.set({
+      resumeProfiles,
+      activeResumeProfileId,
+      parsedResume: activeProfile?.parsedResume || null,
+      parsedResumeAt: activeProfile?.parsedAt || null,
+      uploadedResumeFile: activeProfile?.uploadedResumeFile || null,
+      atsResultsByProfileUrl,
+      atsHistory
+    });
+  }
+
+  return {
+    resumeProfiles,
+    activeResumeProfileId,
+    activeProfile,
+    atsResultsByProfileUrl,
+    atsHistory
+  };
+}
+
 function base64ToBlob(base64, mimeType) {
   const byteChars = atob(base64);
   const byteNumbers = new Array(byteChars.length);
@@ -208,7 +400,7 @@ function base64ToBlob(base64, mimeType) {
   return new Blob([byteArray], { type: mimeType });
 }
 
-function summarizeAtsHistory(history) {
+function summarizeAtsHistory(history, profileLabel = "current profile") {
   const total = history.length;
 
   if (!total) {
@@ -216,7 +408,7 @@ function summarizeAtsHistory(history) {
       totalRecords: 0,
       keywordStats: {},
       ruleStats: {},
-      summaryText: "No ATS history yet."
+      summaryText: `No ATS history yet for ${profileLabel}.`
     };
   }
 
@@ -277,7 +469,7 @@ function summarizeAtsHistory(history) {
     .map(([label, count]) => `${label} (${count})`);
 
   const summaryText = [
-    `Scanned ${total} job pages.`,
+    `Scanned ${total} job pages for ${profileLabel}.`,
     ruleStats.authorizationMentioned
       ? `Authorization language appeared in ${ruleStats.authorizationMentioned} postings, with ${ruleStats.authorizationBlocker} likely blockers.`
       : "No authorization language detected yet.",

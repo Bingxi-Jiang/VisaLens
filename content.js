@@ -140,6 +140,8 @@ let currentConfig = { ...DEFAULT_CONFIG };
 let latestScanResults = null;
 let latestMatchResult = null;
 let parsedResume = null;
+let resumeProfiles = [];
+let activeResumeProfileId = null;
 let historyCount = 0;
 let latestHistorySummary = null;
 
@@ -218,6 +220,99 @@ function escapeHtml(str) {
 function formatTags(tags, className = "jf-tag") {
   if (!Array.isArray(tags) || !tags.length) return "";
   return `<div class="jf-tags">${tags.map((t) => `<span class="${className}">${escapeHtml(t)}</span>`).join("")}</div>`;
+}
+
+function formatTimestamp(iso) {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleDateString([], {
+      year: "numeric",
+      month: "short",
+      day: "numeric"
+    });
+  } catch {
+    return String(iso);
+  }
+}
+
+function normalizeResumeProfilesState(data) {
+  let profiles = Array.isArray(data.resumeProfiles) ? data.resumeProfiles.filter(Boolean) : [];
+  let activeId = data.activeResumeProfileId || null;
+
+  if (!profiles.length && data.parsedResume) {
+    profiles = [{
+      id: "legacy-local-profile",
+      label: String(data.uploadedResumeFile?.displayName || data.uploadedResumeFile?.name || "Imported Resume").replace(/\.pdf$/i, "") || "Imported Resume",
+      fileName: data.uploadedResumeFile?.displayName || data.uploadedResumeFile?.name || "resume.pdf",
+      parsedAt: data.parsedResumeAt || null,
+      uploadedResumeFile: data.uploadedResumeFile || null,
+      parsedResume: data.parsedResume
+    }];
+    activeId = profiles[0].id;
+  }
+
+  if (!activeId && profiles.length) activeId = profiles[0].id;
+  const activeProfile = profiles.find((profile) => profile.id === activeId) || profiles[0] || null;
+
+  return {
+    profiles,
+    activeId: activeProfile?.id || null,
+    activeProfile
+  };
+}
+
+function applyResumeProfilesState(state) {
+  resumeProfiles = state.profiles || [];
+  activeResumeProfileId = state.activeId || null;
+  parsedResume = state.activeProfile?.parsedResume || null;
+}
+
+function getActiveResumeProfile() {
+  return resumeProfiles.find((profile) => profile.id === activeResumeProfileId) || resumeProfiles[0] || null;
+}
+
+function getProfileDisplayLabel(profile) {
+  if (!profile) return "No active profile";
+  return profile.label || profile.fileName || profile.parsedResume?.name || "Untitled profile";
+}
+
+function renderActiveResumeProfileDetails(profile) {
+  const resume = profile?.parsedResume;
+  if (!resume) {
+    return `<div class="jf-empty">No parsed resume selected yet.</div>`;
+  }
+
+  return `
+    <div class="jf-section">
+      <div class="jf-label">Candidate</div>
+      <div class="jf-profile-name">${escapeHtml(resume.name || "Unknown candidate")}</div>
+      ${resume.summary ? `<div class="jf-summary">${escapeHtml(resume.summary)}</div>` : ""}
+    </div>
+
+    ${
+      Array.isArray(resume.degrees) && resume.degrees.length
+        ? `<div class="jf-section"><div class="jf-label">Degrees</div>${formatTags(resume.degrees.slice(0, 5))}</div>`
+        : ""
+    }
+
+    ${
+      Array.isArray(resume.skills) && resume.skills.length
+        ? `<div class="jf-section"><div class="jf-label">Skills</div>${formatTags(resume.skills.slice(0, 10))}</div>`
+        : ""
+    }
+
+    ${
+      Array.isArray(resume.programming_languages) && resume.programming_languages.length
+        ? `<div class="jf-section"><div class="jf-label">Languages</div>${formatTags(resume.programming_languages.slice(0, 8))}</div>`
+        : ""
+    }
+
+    ${
+      Array.isArray(resume.frameworks) && resume.frameworks.length
+        ? `<div class="jf-section"><div class="jf-label">Frameworks</div>${formatTags(resume.frameworks.slice(0, 8))}</div>`
+        : ""
+    }
+  `;
 }
 
 function detectAuthorizationBlocker(text) {
@@ -435,6 +530,7 @@ function buildIntentSummary() {
 }
 
 function renderResultTab() {
+  const activeProfile = getActiveResumeProfile();
   const scanResults = latestScanResults || {
     authorization: { matched: false, terms: [], blocker: false },
     degree: { matched: false, terms: [], educationStatusTerms: [], educationYearTerms: [], educationDetailSnippets: [] }
@@ -446,11 +542,22 @@ function renderResultTab() {
     <div class="jf-summary jf-mode-note">${buildIntentSummary()}</div>
 
     <div class="jf-action-row">
-      <button class="jf-button" id="jf-match-btn">Match This Page</button>
+      <button class="jf-button" id="jf-match-btn" ${activeProfile ? "" : "disabled"}>Match This Page</button>
       <button class="jf-button secondary" id="jf-summary-btn">Summarize ATS History</button>
     </div>
 
-    <div class="jf-meta-line">ATS history count: ${historyCount}</div>
+    <div class="jf-meta-line">Active profile: ${escapeHtml(getProfileDisplayLabel(activeProfile))}</div>
+    <div class="jf-meta-line">Profile history count: ${historyCount}</div>
+
+    ${
+      !activeProfile
+        ? `
+        <div class="jf-section">
+          <div class="jf-empty">Upload or select a resume profile in the Profile tab before generating ATS match results.</div>
+        </div>
+      `
+        : ""
+    }
 
     <div class="jf-section">
       <div class="jf-label">Work Auth / Sponsorship</div>
@@ -500,6 +607,7 @@ function renderResultTab() {
         ? `
         <div class="jf-section">
           <div class="jf-label">ATS Match</div>
+          <div class="jf-meta-line">Compared with: ${escapeHtml(getProfileDisplayLabel(activeProfile))}</div>
           <div class="jf-score-row">
             <div class="jf-score-box">
               <div class="jf-score-number">${escapeHtml(String(latestMatchResult.match_score ?? "-"))}</div>
@@ -565,6 +673,36 @@ function renderResultTab() {
 }
 
 function renderProfileTab() {
+  const activeProfile = getActiveResumeProfile();
+  const profilesHtml = resumeProfiles.length
+    ? resumeProfiles.map((profile) => {
+        const isActive = profile.id === activeResumeProfileId;
+        const resume = profile.parsedResume || {};
+        const previewTags = [
+          ...(Array.isArray(resume.education_levels) ? resume.education_levels.slice(0, 2) : []),
+          ...(Array.isArray(resume.majors) ? resume.majors.slice(0, 2) : [])
+        ].filter(Boolean);
+
+        return `
+          <div class="jf-profile-card ${isActive ? "active" : ""}">
+            <div class="jf-profile-card-head">
+              <div>
+                <div class="jf-profile-card-title">${escapeHtml(getProfileDisplayLabel(profile))}</div>
+                <div class="jf-profile-card-meta">${escapeHtml(resume.name || "Unknown candidate")} · ${escapeHtml(profile.fileName || "resume.pdf")} · ${escapeHtml(formatTimestamp(profile.parsedAt) || "Unknown date")}</div>
+              </div>
+              ${isActive ? `<span class="jf-inline-badge">ACTIVE</span>` : ""}
+            </div>
+            ${resume.summary ? `<div class="jf-summary">${escapeHtml(resume.summary)}</div>` : ""}
+            ${previewTags.length ? formatTags(previewTags.slice(0, 4), "jf-tag jf-tag-info") : ""}
+            <div class="jf-profile-button-row">
+              <button class="jf-button ${isActive ? "secondary" : ""}" data-use-profile-id="${escapeHtml(profile.id)}" ${isActive ? "disabled" : ""}>${isActive ? "In Use" : "Use for Matching"}</button>
+              <button class="jf-button secondary danger" data-delete-profile-id="${escapeHtml(profile.id)}">Delete</button>
+            </div>
+          </div>
+        `;
+      }).join("")
+    : `<div class="jf-empty">No saved resume profiles yet. Upload a PDF below to create your first profile.</div>`;
+
   return `
     <div class="jf-section">
       <div class="jf-label">Gemini API Key</div>
@@ -575,52 +713,25 @@ function renderProfileTab() {
     </div>
 
     <div class="jf-section">
-      <div class="jf-label">Resume PDF</div>
+      <div class="jf-label">Add Resume Profile</div>
+      <input class="jf-input" id="jf-resume-label-input" type="text" placeholder="Profile label (e.g. SWE Resume, MLE Resume)" />
+      <div class="jf-input-help">Create multiple resume versions and switch the active one without re-uploading each time.</div>
       <input class="jf-file-input" id="jf-resume-input" type="file" accept="application/pdf" />
       <div class="jf-action-row single">
-        <button class="jf-button" id="jf-parse-resume-btn">Upload & Parse Resume</button>
+        <button class="jf-button" id="jf-parse-resume-btn">Upload & Save Profile</button>
       </div>
     </div>
 
-    ${
-      parsedResume
-        ? `
-        <div class="jf-section">
-          <div class="jf-label">Candidate</div>
-          <div class="jf-profile-name">${escapeHtml(parsedResume.name || "Unknown candidate")}</div>
-          ${parsedResume.summary ? `<div class="jf-summary">${escapeHtml(parsedResume.summary)}</div>` : ""}
-        </div>
+    <div class="jf-section">
+      <div class="jf-label">Saved Profiles</div>
+      <div class="jf-profile-stack">${profilesHtml}</div>
+    </div>
 
-        ${
-          Array.isArray(parsedResume.degrees) && parsedResume.degrees.length
-            ? `<div class="jf-section"><div class="jf-label">Degrees</div>${formatTags(parsedResume.degrees.slice(0, 5))}</div>`
-            : ""
-        }
-
-        ${
-          Array.isArray(parsedResume.skills) && parsedResume.skills.length
-            ? `<div class="jf-section"><div class="jf-label">Skills</div>${formatTags(parsedResume.skills.slice(0, 10))}</div>`
-            : ""
-        }
-
-        ${
-          Array.isArray(parsedResume.programming_languages) && parsedResume.programming_languages.length
-            ? `<div class="jf-section"><div class="jf-label">Languages</div>${formatTags(parsedResume.programming_languages.slice(0, 8))}</div>`
-            : ""
-        }
-
-        ${
-          Array.isArray(parsedResume.frameworks) && parsedResume.frameworks.length
-            ? `<div class="jf-section"><div class="jf-label">Frameworks</div>${formatTags(parsedResume.frameworks.slice(0, 8))}</div>`
-            : ""
-        }
-      `
-        : `
-        <div class="jf-section">
-          <div class="jf-empty">No parsed resume yet.</div>
-        </div>
-      `
-    }
+    <div class="jf-section">
+      <div class="jf-label">Active Profile Preview</div>
+      <div class="jf-meta-line">Currently comparing jobs with: ${escapeHtml(getProfileDisplayLabel(activeProfile))}</div>
+      ${renderActiveResumeProfileDetails(activeProfile)}
+    </div>
   `;
 }
 
@@ -725,10 +836,22 @@ function bindOverlayEvents(root) {
   const showOverlayInput = root.querySelector("#jf-setting-showOverlay");
   const highlightInput = root.querySelector("#jf-setting-highlightMatches");
 
-  if (matchBtn) matchBtn.addEventListener("click", matchCurrentPageFromOverlay);
+  if (matchBtn && !matchBtn.disabled) matchBtn.addEventListener("click", matchCurrentPageFromOverlay);
   if (summaryBtn) summaryBtn.addEventListener("click", summarizeHistoryFromOverlay);
   if (saveApiKeyBtn) saveApiKeyBtn.addEventListener("click", saveApiKeyFromOverlay);
   if (parseResumeBtn) parseResumeBtn.addEventListener("click", parseResumeFromOverlay);
+
+  root.querySelectorAll("[data-use-profile-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void setActiveResumeProfileFromOverlay(button.dataset.useProfileId || "");
+    });
+  });
+
+  root.querySelectorAll("[data-delete-profile-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void deleteResumeProfileFromOverlay(button.dataset.deleteProfileId || "");
+    });
+  });
 
   if (enabledInput) {
     enabledInput.addEventListener("change", (e) => {
@@ -782,20 +905,24 @@ async function saveApiKeyFromOverlay() {
 async function parseResumeFromOverlay() {
   try {
     const input = document.getElementById("jf-resume-input");
+    const labelInput = document.getElementById("jf-resume-label-input");
     const file = input?.files?.[0];
     if (!file) throw new Error("Please choose a PDF first.");
+
+    const profileLabel = labelInput?.value?.trim() || "";
 
     setOverlayStatus("Reading PDF...");
     const base64 = await fileToBase64(file);
 
-    setOverlayStatus("Uploading PDF to Gemini and parsing resume...");
+    setOverlayStatus("Uploading PDF to Gemini and saving resume profile...");
     chrome.runtime.sendMessage(
       {
         type: "PARSE_RESUME_PDF",
         payload: {
           fileName: file.name,
           mimeType: file.type || "application/pdf",
-          fileDataBase64: base64
+          fileDataBase64: base64,
+          profileLabel
         }
       },
       (response) => {
@@ -808,15 +935,80 @@ async function parseResumeFromOverlay() {
           return;
         }
 
-        parsedResume = response.parsedResume || null;
-        currentOverlayTab = "profile";
-        setOverlayStatus("Resume parsed successfully.");
-        renderOverlay();
+        applyResumeProfilesState(normalizeResumeProfilesState({
+          resumeProfiles: response.resumeProfiles || [],
+          activeResumeProfileId: response.activeResumeProfileId || null
+        }));
+        latestHistorySummary = null;
+        latestMatchResult = null;
+        void loadHistoryCount().then(() => {
+          currentOverlayTab = "profile";
+          setOverlayStatus(`Saved profile: ${getProfileDisplayLabel(getActiveResumeProfile())}.`);
+          renderOverlay();
+        });
       }
     );
   } catch (error) {
     setOverlayStatus(String(error));
   }
+}
+
+async function setActiveResumeProfileFromOverlay(profileId) {
+  if (!profileId) return;
+
+  setOverlayStatus("Switching active resume profile...");
+  chrome.runtime.sendMessage({ type: "SET_ACTIVE_RESUME_PROFILE", payload: { profileId } }, (response) => {
+    if (chrome.runtime.lastError) {
+      setOverlayStatus("Failed to switch profile.");
+      return;
+    }
+    if (!response?.ok) {
+      setOverlayStatus(response?.error || "Failed to switch profile.");
+      return;
+    }
+
+    applyResumeProfilesState(normalizeResumeProfilesState({
+      resumeProfiles: response.resumeProfiles || resumeProfiles,
+      activeResumeProfileId: response.activeResumeProfileId || profileId
+    }));
+    latestHistorySummary = null;
+    void Promise.all([loadStoredMatch(), loadHistoryCount()]).then(() => {
+      currentOverlayTab = "profile";
+      setOverlayStatus(`Using profile: ${getProfileDisplayLabel(getActiveResumeProfile())}.`);
+      renderOverlay();
+    });
+  });
+}
+
+async function deleteResumeProfileFromOverlay(profileId) {
+  const target = resumeProfiles.find((profile) => profile.id === profileId);
+  if (!target) return;
+
+  const confirmed = window.confirm(`Delete resume profile "${getProfileDisplayLabel(target)}"?`);
+  if (!confirmed) return;
+
+  setOverlayStatus("Deleting resume profile...");
+  chrome.runtime.sendMessage({ type: "DELETE_RESUME_PROFILE", payload: { profileId } }, (response) => {
+    if (chrome.runtime.lastError) {
+      setOverlayStatus("Failed to delete profile.");
+      return;
+    }
+    if (!response?.ok) {
+      setOverlayStatus(response?.error || "Failed to delete profile.");
+      return;
+    }
+
+    applyResumeProfilesState(normalizeResumeProfilesState({
+      resumeProfiles: response.resumeProfiles || [],
+      activeResumeProfileId: response.activeResumeProfileId || null
+    }));
+    latestHistorySummary = null;
+    void Promise.all([loadStoredMatch(), loadHistoryCount()]).then(() => {
+      currentOverlayTab = "profile";
+      setOverlayStatus(getActiveResumeProfile() ? `Deleted profile. Now using ${getProfileDisplayLabel(getActiveResumeProfile())}.` : "Deleted profile. No active resume profile selected.");
+      renderOverlay();
+    });
+  });
 }
 
 async function matchCurrentPageFromOverlay() {
@@ -1124,10 +1316,11 @@ async function loadConfig() {
 
 async function loadStoredMatch() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(["atsResultsByUrl"], (data) => {
+    chrome.storage.local.get(["atsResultsByProfileUrl", "activeResumeProfileId", "atsResultsByUrl"], (data) => {
       const currentUrl = getCurrentPageUrl();
-      const map = data.atsResultsByUrl || {};
-      latestMatchResult = map[currentUrl]?.result || null;
+      const activeProfileId = data.activeResumeProfileId || activeResumeProfileId;
+      const profileMap = activeProfileId ? data.atsResultsByProfileUrl?.[activeProfileId] || {} : {};
+      latestMatchResult = profileMap[currentUrl]?.result || data.atsResultsByUrl?.[currentUrl]?.result || null;
       resolve();
     });
   });
@@ -1135,8 +1328,8 @@ async function loadStoredMatch() {
 
 async function loadParsedResume() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(["parsedResume"], (data) => {
-      parsedResume = data.parsedResume || null;
+    chrome.storage.local.get(["resumeProfiles", "activeResumeProfileId", "parsedResume", "parsedResumeAt", "uploadedResumeFile"], (data) => {
+      applyResumeProfilesState(normalizeResumeProfilesState(data));
       resolve();
     });
   });
@@ -1144,8 +1337,10 @@ async function loadParsedResume() {
 
 async function loadHistoryCount() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(["atsHistory"], (data) => {
-      historyCount = Array.isArray(data.atsHistory) ? data.atsHistory.length : 0;
+    chrome.storage.local.get(["atsHistory", "activeResumeProfileId"], (data) => {
+      const allHistory = Array.isArray(data.atsHistory) ? data.atsHistory : [];
+      const activeProfileId = data.activeResumeProfileId || activeResumeProfileId;
+      historyCount = activeProfileId ? allHistory.filter((entry) => entry.profileId === activeProfileId).length : allHistory.length;
       resolve();
     });
   });
@@ -1180,23 +1375,23 @@ chrome.storage.onChanged.addListener((changes, area) => {
     }
   }
 
-  if (area === "local" && changes.atsResultsByUrl) {
-    const currentUrl = getCurrentPageUrl();
-    const newMap = changes.atsResultsByUrl.newValue || {};
-    latestMatchResult = newMap[currentUrl]?.result || null;
-    loadHistoryCount().then(() => {
+  if (area === "local" && (changes.resumeProfiles || changes.activeResumeProfileId || changes.parsedResume || changes.parsedResumeAt || changes.uploadedResumeFile)) {
+    latestHistorySummary = null;
+    void Promise.all([loadParsedResume(), loadStoredMatch(), loadHistoryCount()]).then(() => {
       if (overlayVisible) renderOverlay();
     });
   }
 
-  if (area === "local" && changes.parsedResume) {
-    parsedResume = changes.parsedResume.newValue || null;
-    if (overlayVisible) renderOverlay();
+  if (area === "local" && (changes.atsResultsByProfileUrl || changes.atsResultsByUrl)) {
+    void Promise.all([loadStoredMatch(), loadHistoryCount()]).then(() => {
+      if (overlayVisible) renderOverlay();
+    });
   }
 
   if (area === "local" && changes.atsHistory) {
-    historyCount = Array.isArray(changes.atsHistory.newValue) ? changes.atsHistory.newValue.length : 0;
-    if (overlayVisible) renderOverlay();
+    void loadHistoryCount().then(() => {
+      if (overlayVisible) renderOverlay();
+    });
   }
 });
 
@@ -1220,7 +1415,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     if (message.type === "ATS_MATCH_RESULT_UPDATED") {
       const payloadUrl = message.payload?.pageUrl || "";
-      if (payloadUrl === getCurrentPageUrl()) {
+      const payloadProfileId = message.payload?.profileId || null;
+      if (payloadUrl === getCurrentPageUrl() && (!payloadProfileId || payloadProfileId === activeResumeProfileId)) {
         latestMatchResult = message.payload?.matchResult || null;
         currentOverlayTab = "result";
         setOverlayStatus("Match complete.");
