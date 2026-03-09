@@ -37,22 +37,18 @@ const KEYWORD_GROUPS = {
       /\bbachelor\s+of\s+science\b/i,
       /\bbachelor\s+of\s+arts\b/i,
       /\bundergraduate\b/i,
-      /\bbs\b/i,
-      /\bb\.s\.\b/i,
-      /\bba\b/i,
-      /\bb\.a\.\b/i,
+      /\bb\.?\s*s\.?(?=\s*(?:degree\b|in\b|\/|,|or\b|and\b|preferred\b|required\b))/i,
+      /\bb\.?\s*a\.?(?=\s*(?:degree\b|in\b|\/|,|or\b|and\b|preferred\b|required\b))/i,
       /\bmaster'?s?\b/i,
       /\bmaster\s+of\s+science\b/i,
       /\bmaster\s+of\s+arts\b/i,
       /\bgraduate\s+degree\b/i,
-      /\bms\b/i,
-      /\bm\.s\.\b/i,
-      /\bma\b/i,
-      /\bm\.a\.\b/i,
+      /\bm\.?\s*s\.?(?=\s*(?:degree\b|in\b|\/|,|or\b|and\b|preferred\b|required\b))/i,
+      /\bm\.?\s*a\.?(?=\s*(?:degree\b|in\b|\/|,|or\b|and\b|preferred\b|required\b))/i,
+      /\bm\.?\s*eng\.?\b/i,
       /\bmeng\b/i,
-      /\bm\.eng\.\b/i,
       /\bmba\b/i,
-      /\bph\.?d\.?\b/i,
+      /\bph\.?\s*d\.?\b/i,
       /\bdoctorate\b/i,
       /\bdoctoral\b/i,
       /\bdoctor\s+of\s+philosophy\b/i
@@ -787,97 +783,80 @@ function shouldSkipNode(node) {
   return ["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT"].includes(tag) || node.parentElement.isContentEditable;
 }
 
-function buildHighlightRegex() {
-  const phrases = [
-    "no sponsorship",
-    "visa sponsorship",
-    "work authorization",
-    "no work authorization",
-    "must be authorized to work",
-    "legally authorized to work",
-    "authorized to work in the u.s.",
-    "current or future need for sponsorship",
-    "us citizen",
-    "u.s. citizen",
-    "citizenship required",
-    "permanent resident",
-    "green card",
-    "opt",
-    "cpt",
-    "h-1b",
-    "sponsor",
-    "sponsorship",
-    "bachelor of science",
-    "bachelor of arts",
-    "bachelor",
-    "bachelor's",
-    "undergraduate",
-    "bs",
-    "b.s.",
-    "ba",
-    "b.a.",
-    "master of science",
-    "master of arts",
-    "master",
-    "master's",
-    "graduate degree",
-    "ms",
-    "m.s.",
-    "ma",
-    "m.a.",
-    "meng",
-    "m.eng.",
-    "mba",
-    "phd",
-    "ph.d.",
-    "doctorate",
-    "doctoral"
-  ];
+function getHighlightPatterns() {
+  return [...KEYWORD_GROUPS.authorization.keywords, ...KEYWORD_GROUPS.degree.keywords].map((regex) => {
+    const flags = regex.flags.includes("g") ? regex.flags : `${regex.flags}g`;
+    return new RegExp(regex.source, flags);
+  });
+}
 
-  const escaped = phrases
-    .sort((a, b) => b.length - a.length)
-    .map((phrase) => phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+function collectHighlightRanges(text, patterns) {
+  const ranges = [];
 
-  return new RegExp(`(${escaped.join("|")})`, "gi");
+  for (const regex of patterns) {
+    regex.lastIndex = 0;
+    let match;
+
+    while ((match = regex.exec(text)) !== null) {
+      const start = match.index;
+      const end = start + match[0].length;
+      if (end > start) ranges.push([start, end]);
+      if (regex.lastIndex === match.index) regex.lastIndex += 1;
+    }
+  }
+
+  if (!ranges.length) return [];
+
+  ranges.sort((a, b) => a[0] - b[0] || (b[1] - b[0]) - (a[1] - a[0]));
+
+  const merged = [ranges[0].slice()];
+  for (const [start, end] of ranges.slice(1)) {
+    const last = merged[merged.length - 1];
+    if (start <= last[1]) {
+      last[1] = Math.max(last[1], end);
+    } else {
+      merged.push([start, end]);
+    }
+  }
+
+  return merged;
 }
 
 function highlightMatchesInDom() {
   if (!currentConfig.highlightMatches || !document.body) return;
 
   clearHighlights();
-  const regex = buildHighlightRegex();
+  const patterns = getHighlightPatterns();
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   const textNodes = [];
 
   while (walker.nextNode()) {
     const node = walker.currentNode;
     if (!node.nodeValue || shouldSkipNode(node)) continue;
-    regex.lastIndex = 0;
-    if (!regex.test(node.nodeValue)) continue;
-    regex.lastIndex = 0;
-    textNodes.push(node);
+    const ranges = collectHighlightRanges(node.nodeValue, patterns);
+    if (!ranges.length) continue;
+    textNodes.push({ node, ranges });
   }
 
   suppressMutationsFor(500);
 
-  for (const node of textNodes) {
+  for (const { node, ranges } of textNodes) {
     const text = node.nodeValue;
     const frag = document.createDocumentFragment();
     let lastIndex = 0;
 
-    text.replace(regex, (match, offset) => {
-      if (offset > lastIndex) {
-        frag.appendChild(document.createTextNode(text.slice(lastIndex, offset)));
+    for (const [start, end] of ranges) {
+      if (start > lastIndex) {
+        frag.appendChild(document.createTextNode(text.slice(lastIndex, start)));
       }
 
       const mark = document.createElement("mark");
       mark.className = "job-filter-highlight";
-      mark.textContent = match;
+      mark.textContent = text.slice(start, end);
       frag.appendChild(mark);
 
-      lastIndex = offset + match.length;
-      return match;
-    });
+      lastIndex = end;
+    }
 
     if (lastIndex < text.length) {
       frag.appendChild(document.createTextNode(text.slice(lastIndex)));
