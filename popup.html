@@ -2,86 +2,21 @@
 <html>
 <head>
   <meta charset="UTF-8" />
-  <title>JobLens ATS</title>
+  <title>JobLens Launcher</title>
   <style>
-    :root {
-      --bg: #ffffff;
-      --text: #111111;
-      --muted: #666666;
-      --border: #e9e9ee;
-      --panel: #f8f8fb;
-      --panel-2: #f3f4f8;
-      --primary: #111111;
-      --shadow: 0 10px 24px rgba(17, 17, 17, 0.08);
-      --radius: 14px;
-    }
-
-    * {
+    body {
+      font-family: Arial, sans-serif;
+      width: 240px;
+      padding: 14px;
+      margin: 0;
+      background: #fff;
+      color: #111;
       box-sizing: border-box;
     }
 
-    body {
-      font-family: Arial, sans-serif;
-      width: 390px;
-      padding: 14px;
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-    }
-
     h1 {
-      font-size: 18px;
-      margin: 0;
-    }
-
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 12px;
-    }
-
-    .stack {
-      display: grid;
-      gap: 12px;
-    }
-
-    .card {
-      background: #fff;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 14px;
-      box-shadow: var(--shadow);
-    }
-
-    .section-title {
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-      color: var(--muted);
-      margin-bottom: 10px;
-      text-transform: uppercase;
-    }
-
-    .label {
-      font-size: 12px;
-      font-weight: 700;
-      margin-bottom: 6px;
-    }
-
-    .input {
-      width: 100%;
-      border: 1px solid #ddd;
-      border-radius: 12px;
-      padding: 10px 12px;
-      font-size: 13px;
-      outline: none;
-      transition: border-color 0.15s ease, box-shadow 0.15s ease;
-    }
-
-    .input:focus {
-      border-color: #bfc3cf;
-      box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.06);
+      font-size: 16px;
+      margin: 0 0 12px;
     }
 
     .button {
@@ -92,302 +27,33 @@
       font-size: 13px;
       font-weight: 700;
       cursor: pointer;
-      background: var(--primary);
+      background: #111;
       color: #fff;
-      transition: transform 0.05s ease, opacity 0.15s ease;
-    }
-
-    .button:hover {
-      opacity: 0.94;
-    }
-
-    .button:active {
-      transform: translateY(1px);
-    }
-
-    .button.secondary {
-      background: var(--panel-2);
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-
-    .meta {
-      font-size: 12px;
-      color: var(--muted);
-      line-height: 1.5;
-    }
-
-    pre {
-      white-space: pre-wrap;
-      word-break: break-word;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 10px;
-      font-size: 12px;
-      max-height: 280px;
-      overflow: auto;
-      margin: 0;
-    }
-
-    .small {
-      font-size: 11px;
-      color: var(--muted);
-      line-height: 1.5;
-    }
-
-    .spacer-8 {
-      height: 8px;
-    }
-
-    .spacer-10 {
-      height: 10px;
-    }
-
-    .tabs {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
-    .tab-btn {
-      border: 1px solid var(--border);
-      background: var(--panel);
-      color: var(--text);
-      border-radius: 12px;
-      padding: 10px 8px;
-      font-size: 12px;
-      font-weight: 700;
-      cursor: pointer;
-      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-    }
-
-    .tab-btn.active {
-      background: var(--primary);
-      color: #fff;
-      border-color: var(--primary);
-    }
-
-    .tab-panel {
-      display: none;
-    }
-
-    .tab-panel.active {
-      display: block;
-    }
-
-    .settings-list {
-      display: grid;
-      gap: 10px;
-    }
-
-    .setting-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 12px;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      background: var(--panel);
-    }
-
-    .setting-copy {
-      min-width: 0;
-      flex: 1;
-    }
-
-    .setting-title {
-      font-size: 13px;
-      font-weight: 700;
-      line-height: 1.25;
-      color: var(--text);
-    }
-
-    .setting-desc {
-      margin-top: 3px;
-      font-size: 11px;
-      color: var(--muted);
-      line-height: 1.35;
-    }
-
-    .switch input {
-      position: absolute;
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    .switch {
-      position: relative;
-      width: 46px;
-      height: 28px;
-      flex: 0 0 auto;
-      display: inline-block;
-    }
-
-    .slider {
-      position: absolute;
-      inset: 0;
-      border-radius: 999px;
-      background: #d7dae2;
-      transition: background 0.2s ease;
-      cursor: pointer;
-    }
-
-    .slider::before {
-      content: "";
-      position: absolute;
-      width: 22px;
-      height: 22px;
-      left: 3px;
-      top: 3px;
-      border-radius: 50%;
-      background: #fff;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
-      transition: transform 0.2s ease;
-    }
-
-    .switch input:checked + .slider {
-      background: #111111;
-    }
-
-    .switch input:checked + .slider::before {
-      transform: translateX(18px);
-    }
-
-    .switch input:focus-visible + .slider {
-      box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.12);
-    }
-
-    .profile-grid {
-      display: grid;
-      gap: 10px;
-    }
-
-    .pill-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
       margin-top: 8px;
     }
 
-    .pill {
-      font-size: 11px;
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      color: var(--text);
+    .button.secondary {
+      background: #f3f4f8;
+      color: #111;
+      border: 1px solid #e6e8ef;
+    }
+
+    .meta {
+      margin-top: 12px;
+      font-size: 12px;
+      color: #666;
+      line-height: 1.5;
     }
   </style>
 </head>
 <body>
-  <div class="header">
-    <h1>JobLens ATS</h1>
-  </div>
+  <h1>JobLens</h1>
 
-  <div class="tabs">
-    <button class="tab-btn active" data-tab="resultTab">Result</button>
-    <button class="tab-btn" data-tab="profileTab">Profile</button>
-    <button class="tab-btn" data-tab="settingsTab">Settings</button>
-  </div>
+  <button id="openBtn" class="button">Open JobLens</button>
+  <button id="minimizeBtn" class="button secondary">Minimize</button>
+  <button id="hideBtn" class="button secondary">Hide for This Page</button>
 
-  <div id="resultTab" class="tab-panel active">
-    <div class="stack">
-      <div class="card">
-        <div class="section-title">Match</div>
-        <button id="matchBtn" class="button">Match With Current Job Page</button>
-        <div class="spacer-10"></div>
-        <button id="summarizeHistoryBtn" class="button secondary">Summarize ATS History</button>
-        <div class="spacer-8"></div>
-        <div id="historyMeta" class="meta">ATS history count: 0</div>
-      </div>
-
-      <div class="card">
-        <div class="section-title">Status</div>
-        <div id="status" class="meta">Idle.</div>
-      </div>
-
-      <div class="card">
-        <div class="section-title">Last Result</div>
-        <pre id="output">No result yet.</pre>
-      </div>
-    </div>
-  </div>
-
-  <div id="profileTab" class="tab-panel">
-    <div class="stack">
-      <div class="card">
-        <div class="section-title">API</div>
-        <div class="label">Gemini API Key</div>
-        <input id="apiKeyInput" class="input" type="password" placeholder="Paste your Gemini API key" />
-        <div class="spacer-10"></div>
-        <button id="saveApiKeyBtn" class="button secondary">Save API Key</button>
-      </div>
-
-      <div class="card">
-        <div class="section-title">Resume</div>
-        <div class="label">Resume PDF</div>
-        <input id="resumePdf" type="file" accept="application/pdf" />
-        <div class="spacer-10"></div>
-        <button id="parseResumeBtn" class="button">Upload & Parse Resume</button>
-      </div>
-
-      <div class="card">
-        <div class="section-title">Parsed Profile</div>
-        <div id="profileMeta" class="meta">No parsed resume yet.</div>
-        <div class="pill-row" id="profilePills"></div>
-      </div>
-    </div>
-  </div>
-
-  <div id="settingsTab" class="tab-panel">
-    <div class="stack">
-      <div class="card">
-        <div class="section-title">Settings</div>
-
-        <div class="settings-list">
-          <div class="setting-row">
-            <div class="setting-copy">
-              <div class="setting-title">Enable scanning</div>
-              <div class="setting-desc">Run keyword detection on the current page.</div>
-            </div>
-            <label class="switch">
-              <input type="checkbox" id="enabled" />
-              <span class="slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-copy">
-              <div class="setting-title">Show overlay</div>
-              <div class="setting-desc">Display the floating JobLens result panel on pages.</div>
-            </div>
-            <label class="switch">
-              <input type="checkbox" id="showOverlay" />
-              <span class="slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-row">
-            <div class="setting-copy">
-              <div class="setting-title">Highlight terms</div>
-              <div class="setting-desc">Highlight sponsorship and degree keywords in the page text.</div>
-            </div>
-            <label class="switch">
-              <input type="checkbox" id="highlightMatches" />
-              <span class="slider"></span>
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <div class="small">
-        Development build. For production, move Gemini calls to your own backend proxy.
-      </div>
-    </div>
-  </div>
+  <div id="status" class="meta">Launcher ready.</div>
 
   <script src="popup.js"></script>
 </body>
