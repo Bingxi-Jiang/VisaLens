@@ -3,13 +3,15 @@
   top: 16px;
   right: 16px;
   z-index: 2147483647;
-  width: 350px;
-  background: rgba(18, 18, 22, 0.97);
+  width: 390px;
+  max-height: calc(100vh - 32px);
+  overflow: hidden;
+  background: rgba(18, 18, 22, 0.98);
   color: #fff;
   border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 14px;
-  box-shadow: 0 14px 32px rgba(0,0,0,0.32);
-  backdrop-filter: blur(8px);
+  border-radius: 16px;
+  box-shadow: 0 16px 36px rgba(0,0,0,0.34);
+  backdrop-filter: blur(10px);
   padding: 12px;
   font-family: Arial, sans-serif;
 }
@@ -18,7 +20,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .jf-title {
@@ -34,10 +36,46 @@
   cursor: pointer;
 }
 
+.jf-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.jf-tab {
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+  color: #f2f2f2;
+  border-radius: 12px;
+  padding: 9px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.jf-tab.active {
+  background: #ffffff;
+  color: #111;
+  border-color: #ffffff;
+}
+
+.jf-body {
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
 .jf-section {
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+.jf-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 
 .jf-label {
@@ -145,6 +183,101 @@
   background: rgba(255,255,255,0.04);
   padding: 8px;
   border-radius: 10px;
+}
+
+.jf-empty {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #d2d2d2;
+  background: rgba(255,255,255,0.04);
+  padding: 10px;
+  border-radius: 10px;
+}
+
+.jf-profile-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.jf-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.04);
+  margin-bottom: 10px;
+}
+
+.jf-setting-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.jf-setting-title {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #fff;
+}
+
+.jf-setting-desc {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #cfcfcf;
+  line-height: 1.35;
+}
+
+.jf-switch {
+  position: relative;
+  width: 46px;
+  height: 28px;
+  flex: 0 0 auto;
+  display: inline-block;
+}
+
+.jf-switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.jf-slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: #60646f;
+  transition: background 0.2s ease;
+  cursor: pointer;
+}
+
+.jf-slider::before {
+  content: "";
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  left: 3px;
+  top: 3px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+  transition: transform 0.2s ease;
+}
+
+.jf-switch input:checked + .jf-slider {
+  background: #ffffff;
+}
+
+.jf-switch input:checked + .jf-slider::before {
+  transform: translateX(18px);
+  background: #111;
+}
+
+.jf-switch input:focus-visible + .jf-slider {
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.16);
 }
 
 mark.job-filter-highlight {

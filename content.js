@@ -66,12 +66,9 @@ let currentConfig = { ...DEFAULT_CONFIG };
 let rescanTimer = null;
 let mutationDebounce = null;
 let latestMatchResult = null;
-
-/**
- * Problem 1:
- * User closes overlay => do not auto-popup again on same page session.
- */
 let overlayDismissedForThisPage = false;
+let latestScanResults = null;
+let currentOverlayTab = "result";
 
 function getCurrentPageUrl() {
   return location.href;
@@ -130,35 +127,23 @@ function dismissOverlayForCurrentPage() {
   removeOverlay();
 }
 
-function renderOverlay(scanResults, matchResult = latestMatchResult) {
-  removeOverlay();
+function formatTags(tags, className = "jf-tag") {
+  if (!Array.isArray(tags) || !tags.length) return "";
+  return `<div class="jf-tags">${tags.map(t => `<span class="${className}">${escapeHtml(t)}</span>`).join("")}</div>`;
+}
 
-  if (!currentConfig.showOverlay) return;
-  if (overlayDismissedForThisPage) return;
+function renderResultTab(scanResults, matchResult) {
+  const auth = scanResults?.authorization || { matched: false, terms: [], blocker: false };
+  const degree = scanResults?.degree || { matched: false, terms: [] };
 
-  const overlay = document.createElement("div");
-  overlay.id = "job-filter-overlay";
-
-  const auth = scanResults.authorization;
-  const degree = scanResults.degree;
-
-  overlay.innerHTML = `
-    <div class="jf-header">
-      <div class="jf-title">JobLens ATS</div>
-      <button class="jf-close" title="Close">×</button>
-    </div>
-
+  return `
     <div class="jf-section">
       <div class="jf-label">Work Auth / Sponsorship</div>
       <div class="jf-status ${auth.matched ? "jf-hit" : "jf-miss"}">
         ${auth.matched ? "Matched" : "No match"}
       </div>
       ${auth.blocker ? `<div class="jf-badge jf-badge-red">Possible blocker</div>` : ""}
-      ${
-        auth.terms.length
-          ? `<div class="jf-tags">${auth.terms.map(t => `<span class="jf-tag">${escapeHtml(t)}</span>`).join("")}</div>`
-          : ""
-      }
+      ${formatTags(auth.terms)}
     </div>
 
     <div class="jf-section">
@@ -166,11 +151,7 @@ function renderOverlay(scanResults, matchResult = latestMatchResult) {
       <div class="jf-status ${degree.matched ? "jf-hit" : "jf-miss"}">
         ${degree.matched ? "Matched" : "No match"}
       </div>
-      ${
-        degree.terms.length
-          ? `<div class="jf-tags">${degree.terms.map(t => `<span class="jf-tag">${escapeHtml(t)}</span>`).join("")}</div>`
-          : ""
-      }
+      ${formatTags(degree.terms)}
     </div>
 
     ${
@@ -198,10 +179,19 @@ function renderOverlay(scanResults, matchResult = latestMatchResult) {
           <div class="jf-mini-line"><strong>Auth risk:</strong> ${escapeHtml(matchResult.authorization_risk || "N/A")}</div>
 
           ${
+            Array.isArray(matchResult.skills_matched) && matchResult.skills_matched.length
+              ? `
+              <div class="jf-subtitle">Matched skills</div>
+              ${formatTags(matchResult.skills_matched.slice(0, 8))}
+              `
+              : ""
+          }
+
+          ${
             Array.isArray(matchResult.skills_missing) && matchResult.skills_missing.length
               ? `
               <div class="jf-subtitle">Missing skills</div>
-              <div class="jf-tags">${matchResult.skills_missing.slice(0, 8).map(t => `<span class="jf-tag jf-tag-warn">${escapeHtml(t)}</span>`).join("")}</div>
+              ${formatTags(matchResult.skills_missing.slice(0, 8), "jf-tag jf-tag-warn")}
               `
               : ""
           }
@@ -213,11 +203,178 @@ function renderOverlay(scanResults, matchResult = latestMatchResult) {
           }
         </div>
       `
+        : `
+        <div class="jf-section">
+          <div class="jf-empty">
+            No ATS result for this page yet. Use the extension popup to run a match.
+          </div>
+        </div>
+      `
+    }
+  `;
+}
+
+function renderProfileTab(profile) {
+  if (!profile) {
+    return `
+      <div class="jf-section">
+        <div class="jf-empty">
+          No parsed resume yet. Upload and parse a PDF from the extension popup first.
+        </div>
+      </div>
+    `;
+  }
+
+  const degrees = Array.isArray(profile.degrees) ? profile.degrees.slice(0, 5) : [];
+  const skills = Array.isArray(profile.skills) ? profile.skills.slice(0, 10) : [];
+  const langs = Array.isArray(profile.programming_languages) ? profile.programming_languages.slice(0, 8) : [];
+  const frameworks = Array.isArray(profile.frameworks) ? profile.frameworks.slice(0, 8) : [];
+
+  return `
+    <div class="jf-section">
+      <div class="jf-label">Candidate</div>
+      <div class="jf-profile-name">${escapeHtml(profile.name || "Unknown candidate")}</div>
+      ${
+        profile.summary
+          ? `<div class="jf-summary">${escapeHtml(profile.summary)}</div>`
+          : ""
+      }
+    </div>
+
+    ${
+      degrees.length
+        ? `<div class="jf-section"><div class="jf-label">Degrees</div>${formatTags(degrees)}</div>`
+        : ""
+    }
+
+    ${
+      skills.length
+        ? `<div class="jf-section"><div class="jf-label">Skills</div>${formatTags(skills)}</div>`
+        : ""
+    }
+
+    ${
+      langs.length
+        ? `<div class="jf-section"><div class="jf-label">Languages</div>${formatTags(langs)}</div>`
+        : ""
+    }
+
+    ${
+      frameworks.length
+        ? `<div class="jf-section"><div class="jf-label">Frameworks</div>${formatTags(frameworks)}</div>`
         : ""
     }
   `;
+}
+
+function renderSettingsTab() {
+  return `
+    <div class="jf-section">
+      <div class="jf-setting-row">
+        <div class="jf-setting-copy">
+          <div class="jf-setting-title">Enable scanning</div>
+          <div class="jf-setting-desc">Run keyword detection on this page.</div>
+        </div>
+        <label class="jf-switch">
+          <input type="checkbox" id="jf-setting-enabled" ${currentConfig.enabled ? "checked" : ""} />
+          <span class="jf-slider"></span>
+        </label>
+      </div>
+
+      <div class="jf-setting-row">
+        <div class="jf-setting-copy">
+          <div class="jf-setting-title">Show overlay</div>
+          <div class="jf-setting-desc">Display this floating panel on pages.</div>
+        </div>
+        <label class="jf-switch">
+          <input type="checkbox" id="jf-setting-showOverlay" ${currentConfig.showOverlay ? "checked" : ""} />
+          <span class="jf-slider"></span>
+        </label>
+      </div>
+
+      <div class="jf-setting-row">
+        <div class="jf-setting-copy">
+          <div class="jf-setting-title">Highlight terms</div>
+          <div class="jf-setting-desc">Highlight sponsorship and degree terms in page text.</div>
+        </div>
+        <label class="jf-switch">
+          <input type="checkbox" id="jf-setting-highlightMatches" ${currentConfig.highlightMatches ? "checked" : ""} />
+          <span class="jf-slider"></span>
+        </label>
+      </div>
+    </div>
+  `;
+}
+
+function renderOverlay(scanResults, matchResult = latestMatchResult, profile = null) {
+  removeOverlay();
+
+  if (!currentConfig.showOverlay) return;
+  if (overlayDismissedForThisPage) return;
+
+  const overlay = document.createElement("div");
+  overlay.id = "job-filter-overlay";
+
+  let panelContent = "";
+  if (currentOverlayTab === "profile") {
+    panelContent = renderProfileTab(profile);
+  } else if (currentOverlayTab === "settings") {
+    panelContent = renderSettingsTab();
+  } else {
+    panelContent = renderResultTab(scanResults, matchResult);
+  }
+
+  overlay.innerHTML = `
+    <div class="jf-header">
+      <div class="jf-title">JobLens ATS</div>
+      <button class="jf-close" title="Close">×</button>
+    </div>
+
+    <div class="jf-tabs">
+      <button class="jf-tab ${currentOverlayTab === "result" ? "active" : ""}" data-tab="result">Result</button>
+      <button class="jf-tab ${currentOverlayTab === "profile" ? "active" : ""}" data-tab="profile">Profile</button>
+      <button class="jf-tab ${currentOverlayTab === "settings" ? "active" : ""}" data-tab="settings">Settings</button>
+    </div>
+
+    <div class="jf-body">
+      ${panelContent}
+    </div>
+  `;
 
   overlay.querySelector(".jf-close").addEventListener("click", dismissOverlayForCurrentPage);
+
+  overlay.querySelectorAll(".jf-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      currentOverlayTab = btn.dataset.tab || "result";
+      renderOverlay(latestScanResults, latestMatchResult, window.__joblensParsedResume || null);
+    });
+  });
+
+  const enabledInput = overlay.querySelector("#jf-setting-enabled");
+  const showOverlayInput = overlay.querySelector("#jf-setting-showOverlay");
+  const highlightInput = overlay.querySelector("#jf-setting-highlightMatches");
+
+  if (enabledInput) {
+    enabledInput.addEventListener("change", (e) => {
+      chrome.storage.sync.set({ enabled: e.target.checked });
+    });
+  }
+
+  if (showOverlayInput) {
+    showOverlayInput.addEventListener("change", (e) => {
+      chrome.storage.sync.set({ showOverlay: e.target.checked });
+      if (!e.target.checked) {
+        removeOverlay();
+      }
+    });
+  }
+
+  if (highlightInput) {
+    highlightInput.addEventListener("change", (e) => {
+      chrome.storage.sync.set({ highlightMatches: e.target.checked });
+    });
+  }
+
   document.documentElement.appendChild(overlay);
 }
 
@@ -352,6 +509,7 @@ async function scanPage() {
   if (!text) return;
 
   const results = collectMatches(text);
+  latestScanResults = results;
 
   chrome.storage.local.set({
     lastScan: {
@@ -363,7 +521,7 @@ async function scanPage() {
   });
 
   highlightMatchesInDom();
-  renderOverlay(results, latestMatchResult);
+  renderOverlay(results, latestMatchResult, window.__joblensParsedResume || null);
 }
 
 function scheduleScan() {
@@ -405,6 +563,15 @@ async function loadStoredMatch() {
   });
 }
 
+async function loadParsedResume() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(["parsedResume"], (data) => {
+      window.__joblensParsedResume = data.parsedResume || null;
+      resolve();
+    });
+  });
+}
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "sync") {
     let changed = false;
@@ -432,6 +599,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
     latestMatchResult = newMap[currentUrl]?.result || null;
     scheduleScan();
   }
+
+  if (area === "local" && changes.parsedResume) {
+    window.__joblensParsedResume = changes.parsedResume.newValue || null;
+    if (latestScanResults) {
+      renderOverlay(latestScanResults, latestMatchResult, window.__joblensParsedResume || null);
+    }
+  }
 });
 
 chrome.runtime.onMessage.addListener((message) => {
@@ -439,6 +613,7 @@ chrome.runtime.onMessage.addListener((message) => {
     const payloadUrl = message.payload?.pageUrl || "";
     if (payloadUrl === getCurrentPageUrl()) {
       latestMatchResult = message.payload?.matchResult || null;
+      currentOverlayTab = "result";
       scheduleScan();
     }
   }
@@ -451,9 +626,11 @@ chrome.runtime.onMessage.addListener((message) => {
 
 (async function init() {
   overlayDismissedForThisPage = false;
+  currentOverlayTab = "result";
 
   await loadConfig();
   await loadStoredMatch();
+  await loadParsedResume();
 
   if (!currentConfig.enabled) return;
 
