@@ -17,12 +17,62 @@ const enabledEl = document.getElementById("enabled");
 const highlightEl = document.getElementById("highlightMatches");
 const overlayEl = document.getElementById("showOverlay");
 
+const profileMeta = document.getElementById("profileMeta");
+const profilePills = document.getElementById("profilePills");
+
+const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
+const tabPanels = Array.from(document.querySelectorAll(".tab-panel"));
+
 function setStatus(text) {
   statusBox.textContent = text;
 }
 
 function setOutput(obj) {
   output.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+}
+
+function switchTab(tabId) {
+  tabButtons.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === tabId);
+  });
+
+  tabPanels.forEach((panel) => {
+    panel.classList.toggle("active", panel.id === tabId);
+  });
+}
+
+tabButtons.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    switchTab(btn.dataset.tab);
+  });
+});
+
+function renderProfile(parsedResume) {
+  if (!parsedResume) {
+    profileMeta.textContent = "No parsed resume yet.";
+    profilePills.innerHTML = "";
+    return;
+  }
+
+  const name = parsedResume.name || "Unknown candidate";
+  const skills = Array.isArray(parsedResume.skills) ? parsedResume.skills.slice(0, 8) : [];
+  const degrees = Array.isArray(parsedResume.degrees) ? parsedResume.degrees.slice(0, 4) : [];
+
+  profileMeta.textContent = `Parsed profile loaded for ${name}.`;
+
+  const pills = [...degrees, ...skills].slice(0, 12);
+  profilePills.innerHTML = pills.length
+    ? pills.map((item) => `<span class="pill">${escapeHtml(item)}</span>`).join("")
+    : "";
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function fileToBase64(file) {
@@ -216,6 +266,8 @@ async function loadStoredData() {
         const historyCount = Array.isArray(data.atsHistory) ? data.atsHistory.length : 0;
         historyMeta.textContent = `ATS history count: ${historyCount}`;
 
+        renderProfile(data.parsedResume || null);
+
         if (data.currentPageMatchResult) {
           setOutput(data.currentPageMatchResult);
         } else if (data.parsedResume) {
@@ -285,7 +337,9 @@ parseResumeBtn.addEventListener("click", async () => {
         }
 
         setStatus("Resume parsed successfully.");
+        renderProfile(response.parsedResume || null);
         setOutput(response.parsedResume);
+        switchTab("profileTab");
       }
     );
   } catch (error) {
@@ -346,6 +400,7 @@ matchBtn.addEventListener("click", async () => {
 
             setStatus("Match complete.");
             setOutput(response.matchResult);
+            switchTab("resultTab");
             loadStoredData();
           }
         );
@@ -378,12 +433,14 @@ summarizeHistoryBtn.addEventListener("click", () => {
 
       setStatus("ATS history summary ready.");
       setOutput(response.summary.summaryText || JSON.stringify(response.summary, null, 2));
+      switchTab("resultTab");
       loadStoredData();
     }
   );
 });
 
 document.addEventListener("DOMContentLoaded", () => {
+  switchTab("resultTab");
   loadSettings();
   loadStoredData();
 });
