@@ -8,6 +8,8 @@ const apiKeyInput = document.getElementById("apiKeyInput");
 const saveApiKeyBtn = document.getElementById("saveApiKeyBtn");
 const parseResumeBtn = document.getElementById("parseResumeBtn");
 const matchBtn = document.getElementById("matchBtn");
+const summarizeHistoryBtn = document.getElementById("summarizeHistoryBtn");
+const historyMeta = document.getElementById("historyMeta");
 const output = document.getElementById("output");
 const statusBox = document.getElementById("status");
 
@@ -53,6 +55,110 @@ function getActiveTab() {
       }
       resolve(tabs[0]);
     });
+  });
+}
+
+function getCurrentPageScanResults(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.scripting.executeScript(
+      {
+        target: { tabId },
+        func: () => {
+          const text = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
+
+          const authPatterns = [
+            /\bsponsor(ship|ed|ing)?\b/i,
+            /\b(no|not)\s+(visa\s+)?sponsor(ship|ed|ing)?\b/i,
+            /\bvisa\s+sponsor(ship|ed|ing)?\b/i,
+            /\bwork\s+authorization\b/i,
+            /\bno\s+work\s+authorization\b/i,
+            /\bmust\s+be\s+authorized\s+to\s+work\b/i,
+            /\blegally\s+authorized\s+to\s+work\b/i,
+            /\bauthorized\s+to\s+work\s+in\s+the\s+u\.?s\.?\b/i,
+            /\bwithout\s+(current\s+or\s+future\s+)?sponsor(ship)?\b/i,
+            /\bcurrent\s+or\s+future\s+need\s+for\s+sponsorship\b/i,
+            /\bwill\s+not\s+sponsor\b/i,
+            /\bus\s+citizen(ship)?\b/i,
+            /\bu\.?s\.?\s+citizen(ship)?\b/i,
+            /\bcitizenship\s+required\b/i,
+            /\bpermanent\s+resident\b/i,
+            /\bgreen\s+card\b/i,
+            /\bopt\b/i,
+            /\bcpt\b/i,
+            /\bh-?1b\b/i
+          ];
+
+          const degreePatterns = [
+            /\bbachelor'?s?\b/i,
+            /\bbachelor\s+of\s+science\b/i,
+            /\bbachelor\s+of\s+arts\b/i,
+            /\bundergraduate\b/i,
+            /\bbs\b/i,
+            /\bb\.s\.\b/i,
+            /\bba\b/i,
+            /\bb\.a\.\b/i,
+            /\bmaster'?s?\b/i,
+            /\bmaster\s+of\s+science\b/i,
+            /\bmaster\s+of\s+arts\b/i,
+            /\bgraduate\s+degree\b/i,
+            /\bms\b/i,
+            /\bm\.s\.\b/i,
+            /\bma\b/i,
+            /\bm\.a\.\b/i,
+            /\bmeng\b/i,
+            /\bm\.eng\.\b/i,
+            /\bmba\b/i,
+            /\bph\.?d\.?\b/i,
+            /\bdoctorate\b/i,
+            /\bdoctoral\b/i,
+            /\bdoctor\s+of\s+philosophy\b/i
+          ];
+
+          function collectTerms(patterns) {
+            const found = new Set();
+            for (const regex of patterns) {
+              const match = text.match(regex);
+              if (match && match[0]) found.add(match[0]);
+            }
+            return Array.from(found);
+          }
+
+          const authTerms = collectTerms(authPatterns);
+          const degreeTerms = collectTerms(degreePatterns);
+
+          const blockerPatterns = [
+            /\bno\s+sponsorship\b/i,
+            /\bwill\s+not\s+sponsor\b/i,
+            /\bmust\s+be\s+authorized\s+to\s+work\b/i,
+            /\bwithout\s+(current\s+or\s+future\s+)?sponsorship\b/i,
+            /\bcitizenship\s+required\b/i,
+            /\bus\s+citizen(ship)?\s+required\b/i,
+            /\bsecurity\s+clearance\s+required\b/i
+          ];
+
+          const blocker = blockerPatterns.some((r) => r.test(text));
+
+          return {
+            authorization: {
+              matched: authTerms.length > 0,
+              terms: authTerms,
+              blocker
+            },
+            degree: {
+              matched: degreeTerms.length > 0,
+              terms: degreeTerms
+            }
+          };
+        }
+      },
+      (results) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        resolve(results?.[0]?.result || null);
+      }
+    );
   });
 }
 
@@ -107,6 +213,9 @@ async function loadStoredData() {
         }
 
         const data = response.data || {};
+        const historyCount = Array.isArray(data.atsHistory) ? data.atsHistory.length : 0;
+        historyMeta.textContent = `ATS history count: ${historyCount}`;
+
         if (data.currentPageMatchResult) {
           setOutput(data.currentPageMatchResult);
         } else if (data.parsedResume) {
@@ -195,7 +304,7 @@ matchBtn.addEventListener("click", async () => {
         target: { tabId: tab.id },
         func: () => document.body?.innerText || ""
       },
-      (results) => {
+      async (results) => {
         if (chrome.runtime.lastError) {
           setStatus("Error.");
           setOutput(chrome.runtime.lastError.message);
@@ -204,6 +313,13 @@ matchBtn.addEventListener("click", async () => {
 
         const pageText = results?.[0]?.result || "";
 
+        let scanResults = null;
+        try {
+          scanResults = await getCurrentPageScanResults(tab.id);
+        } catch (e) {
+          scanResults = null;
+        }
+
         setStatus("Matching resume against job page...");
         chrome.runtime.sendMessage(
           {
@@ -211,7 +327,8 @@ matchBtn.addEventListener("click", async () => {
             payload: {
               pageText,
               pageUrl: tab.url || "",
-              pageTitle: tab.title || ""
+              pageTitle: tab.title || "",
+              scanResults
             }
           },
           (response) => {
@@ -229,6 +346,7 @@ matchBtn.addEventListener("click", async () => {
 
             setStatus("Match complete.");
             setOutput(response.matchResult);
+            loadStoredData();
           }
         );
       }
@@ -237,6 +355,32 @@ matchBtn.addEventListener("click", async () => {
     setStatus("Error.");
     setOutput(String(error));
   }
+});
+
+summarizeHistoryBtn.addEventListener("click", () => {
+  setStatus("Summarizing ATS history...");
+  chrome.runtime.sendMessage(
+    {
+      type: "SUMMARIZE_ATS_HISTORY"
+    },
+    (response) => {
+      if (chrome.runtime.lastError) {
+        setStatus("Error.");
+        setOutput(chrome.runtime.lastError.message);
+        return;
+      }
+
+      if (!response || !response.ok) {
+        setStatus("Error.");
+        setOutput(response?.error || "Failed to summarize ATS history.");
+        return;
+      }
+
+      setStatus("ATS history summary ready.");
+      setOutput(response.summary.summaryText || JSON.stringify(response.summary, null, 2));
+      loadStoredData();
+    }
+  );
 });
 
 document.addEventListener("DOMContentLoaded", () => {
