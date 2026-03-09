@@ -32,13 +32,30 @@ So instead of doing `Ctrl + F` over and over for every possible wording, I built
 ## 🚀 What it does
 
 - 🛂 Detects sponsorship / work authorization language
-- 🎓 Detects degree requirements
+- 🎓 Detects degree requirements and deeper education eligibility signals
 - 📄 Parses resume PDFs with Gemini
 - 📊 Generates ATS-style match results
 - 🧠 Saves match history by job URL
 - 💡 Highlights important signals directly on the page
+- 🧾 Surfaces extra education details such as “currently pursuing”, “completed degree”, graduation timing, and year-of-study requirements when present
 - 🎯 Auto-detects likely job/application pages
 - 🖱️ Lets you manually open the overlay on any page via the extension icon
+
+---
+
+## 🎓 Education-signal coverage
+
+VisaLens now goes beyond simple degree-name matching.
+
+When a posting includes additional education eligibility language, the overlay can surface details like:
+
+- currently pursuing a degree
+- completed degree / already graduated requirements
+- expected graduation timing
+- second-year / junior-year / senior-year / final-year / penultimate-year requirements
+- academic standing phrasing such as rising junior or senior standing
+
+These appear in the Degree section as extra education details when present on the page.
 
 ---
 

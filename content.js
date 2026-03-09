@@ -51,10 +51,38 @@ const KEYWORD_GROUPS = {
       /\bph\.?\s*d\.?\b/i,
       /\bdoctorate\b/i,
       /\bdoctoral\b/i,
-      /\bdoctor\s+of\s+philosophy\b/i
+      /\bdoctor\s+of\s+philosophy\b/i,
+      /\bcurrently\s+pursuing\b/i,
+      /\bcurrently\s+enrolled\b/i,
+      /\benrolled\s+in\b/i,
+      /\bexpected\s+to\s+graduate\b/i,
+      /\b(?:have\s+)?completed\s+(?:an?\s+)?(?:bachelor'?s?|master'?s?|degree|program)\b/i,
+      /\brising\s+(?:junior|senior)\b/i,
+      /\b(?:first|1st|second|2nd|third|3rd|fourth|4th|final|penultimate)\s+year\b/i,
+      /\b(?:junior|senior|sophomore|freshman)\s+year\b/i,
+      /\b(?:junior|senior|sophomore|freshman)\s+standing\b/i
     ]
   }
 };
+
+const EDUCATION_STATUS_PATTERNS = [
+  /\bcurrently\s+pursuing\s+(?:an?\s+)?[^.;:]{0,140}?(?:degree|program|bachelor'?s?|master'?s?|undergraduate|graduate|ph\.?\s*d\.?|doctorate)[^.;:]{0,80}/gi,
+  /\bpursuing\s+(?:an?\s+)?[^.;:]{0,140}?(?:degree|program|bachelor'?s?|master'?s?|undergraduate|graduate|ph\.?\s*d\.?|doctorate)[^.;:]{0,80}/gi,
+  /\bcurrently\s+enrolled\s+in\s+[^.;:]{0,140}?(?:degree|program|bachelor'?s?|master'?s?|undergraduate|graduate|ph\.?\s*d\.?|doctorate)[^.;:]{0,80}/gi,
+  /\benrolled\s+in\s+[^.;:]{0,140}?(?:degree|program|bachelor'?s?|master'?s?|undergraduate|graduate|ph\.?\s*d\.?|doctorate)[^.;:]{0,80}/gi,
+  /\b(?:have\s+)?completed\s+(?:an?\s+)?[^.;:]{0,140}?(?:degree|program|bachelor'?s?|master'?s?|ph\.?\s*d\.?|doctorate)[^.;:]{0,80}/gi,
+  /\bexpected\s+to\s+graduate\s+(?:in|by)?\s*[^.;:]{0,80}/gi,
+  /\bgraduat(?:ing|ion)\s+(?:between|in|by)\s+[^.;:]{0,80}/gi
+];
+
+const EDUCATION_YEAR_PATTERNS = [
+  /\brising\s+(?:junior|senior)\b/gi,
+  /\b(?:first|1st|second|2nd|third|3rd|fourth|4th|final|penultimate)\s+year\b/gi,
+  /\b(?:junior|senior|sophomore|freshman)\s+year\b/gi,
+  /\b(?:junior|senior|sophomore|freshman)\s+standing\b/gi,
+  /\bfinal-?year\b/gi,
+  /\bpenultimate-?year\b/gi
+];
 
 const ATS_HOST_PATTERNS = [
   /(^|\.)greenhouse\.io$/i,
@@ -205,6 +233,63 @@ function detectAuthorizationBlocker(text) {
   return blockerPatterns.some((r) => r.test(text));
 }
 
+function uniqueNormalizedMatches(text, patterns, maxItems = 8) {
+  const values = [];
+  const seen = new Set();
+
+  for (const pattern of patterns) {
+    const regex = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+    regex.lastIndex = 0;
+    let match;
+
+    while ((match = regex.exec(text)) !== null) {
+      const value = match[0].replace(/\s+/g, " ").trim();
+      const key = value.toLowerCase();
+      if (value && !seen.has(key)) {
+        seen.add(key);
+        values.push(value);
+        if (values.length >= maxItems) return values;
+      }
+      if (regex.lastIndex === match.index) regex.lastIndex += 1;
+    }
+  }
+
+  return values;
+}
+
+function dedupeContainedSnippets(values, maxItems = 6) {
+  const kept = [];
+
+  for (const value of values) {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    const lower = normalized.toLowerCase();
+    if (!lower) continue;
+
+    if (kept.some((existing) => existing.toLowerCase().includes(lower))) continue;
+
+    for (let i = kept.length - 1; i >= 0; i -= 1) {
+      if (lower.includes(kept[i].toLowerCase())) kept.splice(i, 1);
+    }
+
+    kept.push(normalized.length > 160 ? `${normalized.slice(0, 157)}...` : normalized);
+    if (kept.length >= maxItems) break;
+  }
+
+  return kept;
+}
+
+function extractEducationEligibilityDetails(text) {
+  const statusTerms = uniqueNormalizedMatches(text, EDUCATION_STATUS_PATTERNS, 6);
+  const yearTerms = uniqueNormalizedMatches(text, EDUCATION_YEAR_PATTERNS, 6);
+  const detailSnippets = dedupeContainedSnippets([...statusTerms, ...yearTerms], 6);
+
+  return {
+    statusTerms,
+    yearTerms,
+    detailSnippets
+  };
+}
+
 function collectMatches(text) {
   const results = {};
 
@@ -224,6 +309,12 @@ function collectMatches(text) {
   }
 
   results.authorization.blocker = detectAuthorizationBlocker(text);
+
+  const educationDetails = extractEducationEligibilityDetails(text);
+  results.degree.educationStatusTerms = educationDetails.statusTerms;
+  results.degree.educationYearTerms = educationDetails.yearTerms;
+  results.degree.educationDetailSnippets = educationDetails.detailSnippets;
+
   return results;
 }
 
@@ -346,7 +437,7 @@ function buildIntentSummary() {
 function renderResultTab() {
   const scanResults = latestScanResults || {
     authorization: { matched: false, terms: [], blocker: false },
-    degree: { matched: false, terms: [] }
+    degree: { matched: false, terms: [], educationStatusTerms: [], educationYearTerms: [], educationDetailSnippets: [] }
   };
   const auth = scanResults.authorization;
   const degree = scanResults.degree;
@@ -376,6 +467,32 @@ function renderResultTab() {
         ${degree.matched ? "Matched" : "No match"}
       </div>
       ${formatTags(degree.terms)}
+      ${
+        Array.isArray(degree.educationStatusTerms) && degree.educationStatusTerms.length
+          ? `
+          <div class="jf-subtitle">Education status</div>
+          ${formatTags(degree.educationStatusTerms.slice(0, 6), "jf-tag jf-tag-info")}
+          `
+          : ""
+      }
+      ${
+        Array.isArray(degree.educationYearTerms) && degree.educationYearTerms.length
+          ? `
+          <div class="jf-subtitle">Academic year / standing</div>
+          ${formatTags(degree.educationYearTerms.slice(0, 6), "jf-tag jf-tag-info")}
+          `
+          : ""
+      }
+      ${
+        Array.isArray(degree.educationDetailSnippets) && degree.educationDetailSnippets.length
+          ? `
+          <div class="jf-subtitle">Extra education details</div>
+          <div class="jf-detail-list">
+            ${degree.educationDetailSnippets.slice(0, 6).map((item) => `<div class="jf-detail-item">${escapeHtml(item)}</div>`).join("")}
+          </div>
+          `
+          : ""
+      }
     </div>
 
     ${
