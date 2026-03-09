@@ -34,16 +34,12 @@ const KEYWORD_GROUPS = {
     title: "Degree Requirements",
     keywords: [
       /\bbachelor'?s?\b/i,
-      /\bbachelor\s+of\s+science\b/i,
-      /\bbachelor\s+of\s+arts\b/i,
       /\bundergraduate\b/i,
       /\bbs\b/i,
       /\bb\.s\.\b/i,
       /\bba\b/i,
       /\bb\.a\.\b/i,
       /\bmaster'?s?\b/i,
-      /\bmaster\s+of\s+science\b/i,
-      /\bmaster\s+of\s+arts\b/i,
       /\bgraduate\s+degree\b/i,
       /\bms\b/i,
       /\bm\.s\.\b/i,
@@ -55,7 +51,10 @@ const KEYWORD_GROUPS = {
       /\bph\.?d\.?\b/i,
       /\bdoctorate\b/i,
       /\bdoctoral\b/i,
-      /\bdoctor\s+of\s+philosophy\b/i
+      /\bbs\b/i,
+      /\bba\b/i,
+      /\bms\b/i,
+      /\bma\b/i
     ]
   }
 };
@@ -119,7 +118,6 @@ function collectMatches(text) {
     };
   }
 
-  results.authorization.blocker = detectAuthorizationBlocker(text);
   return results;
 }
 
@@ -213,8 +211,11 @@ function renderResultTab() {
       <div class="jf-status ${auth.matched ? "jf-hit" : "jf-miss"}">
         ${auth.matched ? "Matched" : "No match"}
       </div>
-      ${auth.blocker ? `<div class="jf-badge jf-badge-red">Possible blocker</div>` : ""}
-      ${formatTags(auth.terms)}
+      ${
+        auth.terms.length
+          ? `<div class="jf-tags">${auth.terms.map(t => `<span class="jf-tag">${escapeHtml(t)}</span>`).join("")}</div>`
+          : ""
+      }
     </div>
 
     <div class="jf-section">
@@ -646,32 +647,22 @@ function buildHighlightRegex() {
     "bachelor",
     "bachelor's",
     "undergraduate",
-    "bs",
-    "b.s.",
-    "ba",
-    "b.a.",
-    "master of science",
-    "master of arts",
     "master",
     "master's",
-    "graduate degree",
-    "ms",
-    "m.s.",
-    "ma",
-    "m.a.",
-    "meng",
-    "m.eng.",
-    "mba",
-    "doctor of philosophy",
     "phd",
     "ph.d.",
     "doctorate",
-    "doctoral"
+    "doctoral",
+    "opt",
+    "cpt",
+    "h-1b",
+    "sponsor",
+    "sponsorship"
   ];
 
   const escaped = phrases
     .sort((a, b) => b.length - a.length)
-    .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    .map(p => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 
   return new RegExp(`\\b(?:${escaped.join("|")})\\b`, "gi");
 }
@@ -721,7 +712,7 @@ function highlightMatchesInDom() {
   });
 }
 
-async function scanPage() {
+function scanPage() {
   if (!currentConfig.enabled) return;
 
   const text = getPageText();
