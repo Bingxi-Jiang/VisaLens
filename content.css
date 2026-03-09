@@ -16,6 +16,28 @@
   font-family: Arial, sans-serif;
 }
 
+#job-filter-overlay.jf-minimized {
+  width: auto;
+  max-height: none;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.jf-pill-button {
+  border: none;
+  background: rgba(18, 18, 22, 0.98);
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.28);
+}
+
 .jf-header {
   display: flex;
   align-items: center;
@@ -26,6 +48,14 @@
 .jf-title {
   font-size: 15px;
   font-weight: 700;
+}
+
+.jf-close {
+  background: transparent;
+  color: #ddd;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
 }
 
 .jf-tabs {
