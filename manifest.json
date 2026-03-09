@@ -1,19 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "JobLens ATS",
-  "version": "2.0.0",
-  "description": "Detect sponsorship and degree requirements on job pages, upload a resume PDF, and simulate ATS matching with Gemini.",
-  "permissions": [
-    "storage",
-    "scripting",
-    "activeTab"
-  ],
+  "name": "VisaLens",
+  "version": "2.1.0",
+  "description": "Auto-detect job pages for ATS and sponsorship analysis, with manual overlay toggle on any page.",
+  "permissions": ["storage", "scripting", "activeTab"],
   "host_permissions": [
     "<all_urls>",
     "https://generativelanguage.googleapis.com/*"
   ],
   "action": {
-    "default_title": "JobLens ATS"
+    "default_title": "VisaLens"
   },
   "background": {
     "service_worker": "service-worker.js",
@@ -26,15 +22,9 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "content.js"
-      ],
-      "css": [
-        "content.css"
-      ],
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
       "run_at": "document_idle"
     }
   ]

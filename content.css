@@ -16,38 +16,36 @@
   font-family: Arial, sans-serif;
 }
 
-#job-filter-overlay.jf-minimized {
-  width: auto;
-  max-height: none;
-  padding: 0;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  backdrop-filter: none;
-}
-
-.jf-pill-button {
-  border: none;
-  background: rgba(18, 18, 22, 0.98);
-  color: #fff;
-  padding: 10px 14px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 12px 28px rgba(0,0,0,0.28);
-}
-
 .jf-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   margin-bottom: 10px;
+  gap: 12px;
 }
 
 .jf-title {
   font-size: 15px;
   font-weight: 700;
+}
+
+.jf-subhead {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #b8b8b8;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.jf-mode-badge {
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+  color: #f2f2f2;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
 }
 
 .jf-tabs {
@@ -84,7 +82,7 @@
 }
 
 .jf-body {
-  max-height: calc(100vh - 165px);
+  max-height: calc(100vh - 172px);
   overflow-y: auto;
   padding-right: 2px;
 }
@@ -353,4 +351,8 @@ mark.job-filter-highlight {
   color: #111;
   padding: 0 2px;
   border-radius: 2px;
+}
+
+.jf-mode-note {
+  margin-bottom: 10px;
 }

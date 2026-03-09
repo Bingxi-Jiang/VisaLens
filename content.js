@@ -34,12 +34,16 @@ const KEYWORD_GROUPS = {
     title: "Degree Requirements",
     keywords: [
       /\bbachelor'?s?\b/i,
+      /\bbachelor\s+of\s+science\b/i,
+      /\bbachelor\s+of\s+arts\b/i,
       /\bundergraduate\b/i,
       /\bbs\b/i,
       /\bb\.s\.\b/i,
       /\bba\b/i,
       /\bb\.a\.\b/i,
       /\bmaster'?s?\b/i,
+      /\bmaster\s+of\s+science\b/i,
+      /\bmaster\s+of\s+arts\b/i,
       /\bgraduate\s+degree\b/i,
       /\bms\b/i,
       /\bm\.s\.\b/i,
@@ -51,38 +55,145 @@ const KEYWORD_GROUPS = {
       /\bph\.?d\.?\b/i,
       /\bdoctorate\b/i,
       /\bdoctoral\b/i,
-      /\bbs\b/i,
-      /\bba\b/i,
-      /\bms\b/i,
-      /\bma\b/i
+      /\bdoctor\s+of\s+philosophy\b/i
     ]
   }
 };
 
-let currentConfig = { ...DEFAULT_CONFIG };
-let rescanTimer = null;
-let mutationDebounce = null;
-let observerResumeTimer = null;
-let suppressObserverMutations = false;
+const ATS_HOST_PATTERNS = [
+  /(^|\.)greenhouse\.io$/i,
+  /(^|\.)job-boards\.greenhouse\.io$/i,
+  /(^|\.)boards\.greenhouse\.io$/i,
+  /(^|\.)lever\.co$/i,
+  /(^|\.)ashbyhq\.com$/i,
+  /(^|\.)myworkdayjobs\.com$/i,
+  /(^|\.)smartrecruiters\.com$/i,
+  /(^|\.)icims\.com$/i,
+  /(^|\.)jobvite\.com$/i,
+  /(^|\.)taleo\.net$/i,
+  /(^|\.)successfactors\.com$/i
+];
 
+const NEGATIVE_HOST_PATTERNS = [
+  /(^|\.)google\.com$/i,
+  /(^|\.)youtube\.com$/i,
+  /(^|\.)chatgpt\.com$/i,
+  /(^|\.)docs\.google\.com$/i,
+  /(^|\.)mail\.google\.com$/i,
+  /(^|\.)notion\.so$/i,
+  /(^|\.)github\.com$/i
+];
+
+const JOB_PATH_PATTERNS = [
+  /\/jobs?(\/|$)/i,
+  /\/careers?(\/|$)/i,
+  /\/positions?(\/|$)/i,
+  /\/opportunities(\/|$)/i,
+  /\/job-description(\/|$)/i,
+  /\/requisitions?(\/|$)/i,
+  /\/job\//i,
+  /\/apply(\/|$)/i
+];
+
+const JOB_TEXT_SIGNALS = [
+  { label: "Responsibilities", regex: /\bresponsibilities\b/i, weight: 1 },
+  { label: "Qualifications", regex: /\bqualifications\b/i, weight: 1 },
+  { label: "Minimum Qualifications", regex: /\bminimum qualifications\b/i, weight: 2 },
+  { label: "Preferred Qualifications", regex: /\bpreferred qualifications\b/i, weight: 2 },
+  { label: "Requirements", regex: /\brequirements\b/i, weight: 1 },
+  { label: "Job Description", regex: /\bjob description\b/i, weight: 1 },
+  { label: "About the Role", regex: /\babout the role\b/i, weight: 1 },
+  { label: "Apply", regex: /\bapply now\b|\bapply for this job\b/i, weight: 2 },
+  { label: "Compensation", regex: /\bsalary range\b|\bcompensation\b|\bpay range\b/i, weight: 1 },
+  { label: "Benefits", regex: /\bbenefits\b/i, weight: 1 },
+  { label: "Employment Type", regex: /\bfull[- ]time\b|\bpart[- ]time\b|\bintern(ship)?\b/i, weight: 1 },
+  { label: "Job ID", regex: /\bjob id\b|\breq(?:uisition)? id\b/i, weight: 1 },
+  { label: "Work Authorization", regex: /\bwork authorization\b|\bvisa sponsorship\b|\bsponsorship\b/i, weight: 1 },
+  { label: "Equal Opportunity", regex: /\bequal opportunity employer\b/i, weight: 1 }
+];
+
+let currentConfig = { ...DEFAULT_CONFIG };
 let latestScanResults = null;
 let latestMatchResult = null;
 let parsedResume = null;
 let historyCount = 0;
 let latestHistorySummary = null;
 
-let overlayDismissedForThisPage = false;
-let overlayMinimized = false;
 let currentOverlayTab = "result";
 let overlayStatus = "Idle.";
+let overlayVisible = false;
+let overlayMode = "manual";
+let currentPageIntent = {
+  autoOpen: false,
+  likelyJobPage: false,
+  confidence: 0,
+  score: 0,
+  reason: "",
+  matchedSignals: []
+};
+
+let mutationObserver = null;
+let mutationDebounce = null;
+let suppressMutationsUntil = 0;
+let lastKnownUrl = location.href;
 
 function getCurrentPageUrl() {
   return location.href;
 }
 
-function getPageText() {
+function getPageText(limit = 150000) {
   const bodyText = document.body?.innerText || "";
-  return bodyText.replace(/\s+/g, " ").trim();
+  return bodyText.replace(/\s+/g, " ").trim().slice(0, limit);
+}
+
+function suppressMutationsFor(ms = 250) {
+  suppressMutationsUntil = Math.max(suppressMutationsUntil, Date.now() + ms);
+}
+
+function isSuppressedMutationWindow() {
+  return Date.now() < suppressMutationsUntil;
+}
+
+function preserveViewport(fn) {
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  suppressMutationsFor(300);
+  fn();
+  requestAnimationFrame(() => {
+    window.scrollTo(scrollX, scrollY);
+  });
+}
+
+function removeOverlay() {
+  preserveViewport(() => {
+    document.getElementById("job-filter-overlay")?.remove();
+  });
+}
+
+function closeOverlay() {
+  overlayVisible = false;
+  removeOverlay();
+  clearHighlights();
+}
+
+function setOverlayStatus(text) {
+  overlayStatus = text;
+  const el = document.getElementById("jf-status-text");
+  if (el) el.textContent = text;
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatTags(tags, className = "jf-tag") {
+  if (!Array.isArray(tags) || !tags.length) return "";
+  return `<div class="jf-tags">${tags.map((t) => `<span class="${className}">${escapeHtml(t)}</span>`).join("")}</div>`;
 }
 
 function detectAuthorizationBlocker(text) {
@@ -106,9 +217,7 @@ function collectMatches(text) {
 
     for (const regex of group.keywords) {
       const match = text.match(regex);
-      if (match && match[0]) {
-        matchedTerms.add(match[0]);
-      }
+      if (match && match[0]) matchedTerms.add(match[0]);
     }
 
     results[groupKey] = {
@@ -118,76 +227,124 @@ function collectMatches(text) {
     };
   }
 
+  results.authorization.blocker = detectAuthorizationBlocker(text);
   return results;
 }
 
-function removeOverlay() {
-  document.getElementById("job-filter-overlay")?.remove();
-}
-
-function withObserverSuppressed(fn) {
-  suppressObserverMutations = true;
-  clearTimeout(observerResumeTimer);
-
-  try {
-    return fn();
-  } finally {
-    observerResumeTimer = setTimeout(() => {
-      suppressObserverMutations = false;
-    }, 400);
+function hasJobPostingSchema() {
+  const scripts = document.querySelectorAll('script[type="application/ld+json"]');
+  for (const script of scripts) {
+    const text = script.textContent || "";
+    if (/"@type"\s*:\s*"JobPosting"/i.test(text)) return true;
   }
+  return false;
 }
 
-function preservePageScroll(fn) {
-  const x = window.scrollX;
-  const y = window.scrollY;
-  const result = fn();
+function pageHasApplyButton() {
+  const candidates = document.querySelectorAll("a, button, input[type='button'], input[type='submit']");
+  for (const el of candidates) {
+    const label = `${el.textContent || ""} ${el.getAttribute("value") || ""}`.trim();
+    if (/\bapply\b/i.test(label)) return true;
+  }
+  return false;
+}
 
-  requestAnimationFrame(() => {
-    if (window.scrollX !== x || window.scrollY !== y) {
-      window.scrollTo(x, y);
+function pageHasJobMeta() {
+  const text = getPageText(40000);
+  return /\b(location|department|team|requisition id|job id|employment type|salary range)\b/i.test(text);
+}
+
+function detectPageIntent() {
+  const host = location.hostname;
+  const path = location.pathname;
+  const text = getPageText(25000);
+  const matchedSignals = [];
+
+  if (!text) {
+    return {
+      autoOpen: false,
+      likelyJobPage: false,
+      confidence: 0,
+      score: 0,
+      reason: "No readable page text.",
+      matchedSignals
+    };
+  }
+
+  if (NEGATIVE_HOST_PATTERNS.some((r) => r.test(host))) {
+    return {
+      autoOpen: false,
+      likelyJobPage: false,
+      confidence: 0,
+      score: 0,
+      reason: "Excluded common non-job site.",
+      matchedSignals
+    };
+  }
+
+  let score = 0;
+  let strongSignal = false;
+
+  if (ATS_HOST_PATTERNS.some((r) => r.test(host))) {
+    score += 5;
+    strongSignal = true;
+    matchedSignals.push("Known ATS domain");
+  }
+
+  if (JOB_PATH_PATTERNS.some((r) => r.test(path))) {
+    score += 2;
+    matchedSignals.push("Job-like URL path");
+  }
+
+  if (hasJobPostingSchema()) {
+    score += 4;
+    strongSignal = true;
+    matchedSignals.push("JobPosting schema");
+  }
+
+  if (pageHasApplyButton()) {
+    score += 2;
+    matchedSignals.push("Apply button");
+  }
+
+  if (pageHasJobMeta()) {
+    score += 1;
+    matchedSignals.push("Job metadata");
+  }
+
+  for (const signal of JOB_TEXT_SIGNALS) {
+    if (signal.regex.test(text)) {
+      score += signal.weight;
+      matchedSignals.push(signal.label);
     }
-  });
+  }
 
-  return result;
+  const likelyJobPage = strongSignal || score >= 4;
+  const autoOpen = currentConfig.showOverlay && (strongSignal || score >= 7);
+  const confidence = Math.min(1, score / 9);
+  const reason = matchedSignals.length ? matchedSignals.slice(0, 4).join(" · ") : "No strong job-page signals.";
+
+  return {
+    autoOpen,
+    likelyJobPage,
+    confidence,
+    score,
+    reason,
+    matchedSignals
+  };
 }
 
-function setOverlayStatus(text) {
-  overlayStatus = text;
-  const el = document.getElementById("jf-status-text");
-  if (el) el.textContent = text;
-}
+function buildIntentSummary() {
+  const confidencePct = Math.round((currentPageIntent.confidence || 0) * 100);
+  if (overlayMode === "auto") {
+    return `Auto mode · ${confidencePct}% confidence · ${escapeHtml(currentPageIntent.reason || "Detected job page")}`;
+  }
 
-function dismissOverlayForCurrentPage() {
-  overlayDismissedForThisPage = false;
-  overlayMinimized = true;
-  renderOverlay();
-}
+  if (currentPageIntent.likelyJobPage) {
+    return `Manual mode · likely job page · ${confidencePct}% confidence · ${escapeHtml(currentPageIntent.reason)}`;
+  }
 
-function minimizeOverlay() {
-  overlayDismissedForThisPage = false;
-  overlayMinimized = true;
-  renderOverlay();
-}
-
-function restoreOverlay() {
-  overlayDismissedForThisPage = false;
-  overlayMinimized = false;
-  renderOverlay();
-}
-
-function escapeHtml(str) {
-  return String(str)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function formatTags(tags, className = "jf-tag") {
-  if (!Array.isArray(tags) || !tags.length) return "";
-  return `<div class="jf-tags">${tags.map(t => `<span class="${className}">${escapeHtml(t)}</span>`).join("")}</div>`;
+  return `Manual mode · not auto-detected as a job page · ${escapeHtml(currentPageIntent.reason || "You opened this page manually.")}`;
 }
 
 function renderResultTab() {
@@ -199,6 +356,8 @@ function renderResultTab() {
   const degree = scanResults.degree;
 
   return `
+    <div class="jf-summary jf-mode-note">${buildIntentSummary()}</div>
+
     <div class="jf-action-row">
       <button class="jf-button" id="jf-match-btn">Match This Page</button>
       <button class="jf-button secondary" id="jf-summary-btn">Summarize ATS History</button>
@@ -211,11 +370,8 @@ function renderResultTab() {
       <div class="jf-status ${auth.matched ? "jf-hit" : "jf-miss"}">
         ${auth.matched ? "Matched" : "No match"}
       </div>
-      ${
-        auth.terms.length
-          ? `<div class="jf-tags">${auth.terms.map(t => `<span class="jf-tag">${escapeHtml(t)}</span>`).join("")}</div>`
-          : ""
-      }
+      ${auth.blocker ? `<div class="jf-badge jf-badge-red">Possible blocker</div>` : ""}
+      ${formatTags(auth.terms)}
     </div>
 
     <div class="jf-section">
@@ -361,7 +517,7 @@ function renderSettingsTab() {
       <div class="jf-setting-row">
         <div class="jf-setting-copy">
           <div class="jf-setting-title">Enable scanning</div>
-          <div class="jf-setting-desc">Run keyword detection on this page.</div>
+          <div class="jf-setting-desc">Run keyword detection and ATS analysis on supported pages.</div>
         </div>
         <label class="jf-switch">
           <input type="checkbox" id="jf-setting-enabled" ${currentConfig.enabled ? "checked" : ""} />
@@ -371,8 +527,8 @@ function renderSettingsTab() {
 
       <div class="jf-setting-row">
         <div class="jf-setting-copy">
-          <div class="jf-setting-title">Show overlay</div>
-          <div class="jf-setting-desc">Display this floating panel on pages.</div>
+          <div class="jf-setting-title">Auto-open detected job pages</div>
+          <div class="jf-setting-desc">Show the overlay automatically on high-confidence job/application pages.</div>
         </div>
         <label class="jf-switch">
           <input type="checkbox" id="jf-setting-showOverlay" ${currentConfig.showOverlay ? "checked" : ""} />
@@ -383,7 +539,7 @@ function renderSettingsTab() {
       <div class="jf-setting-row">
         <div class="jf-setting-copy">
           <div class="jf-setting-title">Highlight terms</div>
-          <div class="jf-setting-desc">Highlight sponsorship and degree terms in page text.</div>
+          <div class="jf-setting-desc">Highlight sponsorship and degree terms when the extension scans a page.</div>
         </div>
         <label class="jf-switch">
           <input type="checkbox" id="jf-setting-highlightMatches" ${currentConfig.highlightMatches ? "checked" : ""} />
@@ -395,51 +551,54 @@ function renderSettingsTab() {
 }
 
 function renderOverlay() {
-  preservePageScroll(() => {
-    withObserverSuppressed(() => {
-      removeOverlay();
+  if (!overlayVisible) {
+    removeOverlay();
+    return;
+  }
 
-      if (!currentConfig.showOverlay) return;
-      if (overlayDismissedForThisPage) return;
-      if (overlayMinimized) return;
+  let body = "";
+  if (currentOverlayTab === "profile") body = renderProfileTab();
+  else if (currentOverlayTab === "settings") body = renderSettingsTab();
+  else body = renderResultTab();
 
-      const overlay = document.createElement("div");
-      overlay.id = "job-filter-overlay";
+  preserveViewport(() => {
+    const existing = document.getElementById("job-filter-overlay");
+    if (existing) existing.remove();
 
-      let body = "";
-      if (currentOverlayTab === "profile") body = renderProfileTab();
-      else if (currentOverlayTab === "settings") body = renderSettingsTab();
-      else body = renderResultTab();
-
-      overlay.innerHTML = `
-        <div class="jf-header">
-          <div class="jf-title">JobLens ATS</div>
+    const overlay = document.createElement("div");
+    overlay.id = "job-filter-overlay";
+    overlay.innerHTML = `
+      <div class="jf-header">
+        <div>
+          <div class="jf-title">VisaLens</div>
+          <div class="jf-subhead">${overlayMode === "auto" ? "Detected Job Page" : "Manual Scan"}</div>
         </div>
+        <div class="jf-mode-badge">${overlayMode === "auto" ? "AUTO" : "MANUAL"}</div>
+      </div>
 
-        <div class="jf-tabs">
-          <button class="jf-tab ${currentOverlayTab === "result" ? "active" : ""}" data-tab="result">Result</button>
-          <button class="jf-tab ${currentOverlayTab === "profile" ? "active" : ""}" data-tab="profile">Profile</button>
-          <button class="jf-tab ${currentOverlayTab === "settings" ? "active" : ""}" data-tab="settings">Settings</button>
-        </div>
+      <div class="jf-tabs">
+        <button class="jf-tab ${currentOverlayTab === "result" ? "active" : ""}" data-tab="result">Result</button>
+        <button class="jf-tab ${currentOverlayTab === "profile" ? "active" : ""}" data-tab="profile">Profile</button>
+        <button class="jf-tab ${currentOverlayTab === "settings" ? "active" : ""}" data-tab="settings">Settings</button>
+      </div>
 
-        <div class="jf-status-bar">
-          <span id="jf-status-text">${escapeHtml(overlayStatus)}</span>
-        </div>
+      <div class="jf-status-bar">
+        <span id="jf-status-text">${escapeHtml(overlayStatus)}</span>
+      </div>
 
-        <div class="jf-body">${body}</div>
-      `;
+      <div class="jf-body">${body}</div>
+    `;
 
-      document.documentElement.appendChild(overlay);
+    document.documentElement.appendChild(overlay);
 
-      overlay.querySelectorAll(".jf-tab").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          currentOverlayTab = btn.dataset.tab || "result";
-          renderOverlay();
-        });
+    overlay.querySelectorAll(".jf-tab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        currentOverlayTab = btn.dataset.tab || "result";
+        renderOverlay();
       });
-
-      bindOverlayEvents(overlay);
     });
+
+    bindOverlayEvents(overlay);
   });
 }
 
@@ -467,7 +626,6 @@ function bindOverlayEvents(root) {
   if (showOverlayInput) {
     showOverlayInput.addEventListener("change", (e) => {
       chrome.storage.sync.set({ showOverlay: e.target.checked });
-      if (!e.target.checked) removeOverlay();
     });
   }
 
@@ -556,6 +714,10 @@ async function matchCurrentPageFromOverlay() {
       return;
     }
 
+    if (!latestScanResults) {
+      await scanPage({ forcedByUser: true });
+    }
+
     setOverlayStatus("Matching resume against current page...");
     chrome.runtime.sendMessage(
       {
@@ -608,6 +770,7 @@ async function summarizeHistoryFromOverlay() {
 }
 
 function clearHighlights() {
+  suppressMutationsFor(300);
   document.querySelectorAll("mark.job-filter-highlight").forEach((el) => {
     const parent = el.parentNode;
     if (!parent) return;
@@ -618,8 +781,10 @@ function clearHighlights() {
 
 function shouldSkipNode(node) {
   if (!node.parentElement) return true;
+  if (node.parentElement.closest("#job-filter-overlay")) return true;
+  if (node.parentElement.closest("mark.job-filter-highlight")) return true;
   const tag = node.parentElement.tagName;
-  return ["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT"].includes(tag);
+  return ["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "INPUT"].includes(tag) || node.parentElement.isContentEditable;
 }
 
 function buildHighlightRegex() {
@@ -647,73 +812,83 @@ function buildHighlightRegex() {
     "bachelor",
     "bachelor's",
     "undergraduate",
+    "bs",
+    "b.s.",
+    "ba",
+    "b.a.",
+    "master of science",
+    "master of arts",
     "master",
     "master's",
+    "graduate degree",
+    "ms",
+    "m.s.",
+    "ma",
+    "m.a.",
+    "meng",
+    "m.eng.",
+    "mba",
     "phd",
     "ph.d.",
     "doctorate",
-    "doctoral",
-    "opt",
-    "cpt",
-    "h-1b",
-    "sponsor",
-    "sponsorship"
+    "doctoral"
   ];
 
   const escaped = phrases
     .sort((a, b) => b.length - a.length)
-    .map(p => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    .map((phrase) => phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 
-  return new RegExp(`\\b(?:${escaped.join("|")})\\b`, "gi");
+  return new RegExp(`(${escaped.join("|")})`, "gi");
 }
 
 function highlightMatchesInDom() {
   if (!currentConfig.highlightMatches || !document.body) return;
 
-  withObserverSuppressed(() => {
-    clearHighlights();
-    const regex = buildHighlightRegex();
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    const textNodes = [];
+  clearHighlights();
+  const regex = buildHighlightRegex();
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
 
-    while (walker.nextNode()) {
-      const node = walker.currentNode;
-      if (!node.nodeValue || shouldSkipNode(node)) continue;
-      if (!regex.test(node.nodeValue)) continue;
-      regex.lastIndex = 0;
-      textNodes.push(node);
-    }
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (!node.nodeValue || shouldSkipNode(node)) continue;
+    regex.lastIndex = 0;
+    if (!regex.test(node.nodeValue)) continue;
+    regex.lastIndex = 0;
+    textNodes.push(node);
+  }
 
-    for (const node of textNodes) {
-      const text = node.nodeValue;
-      const frag = document.createDocumentFragment();
-      let lastIndex = 0;
+  suppressMutationsFor(500);
 
-      text.replace(regex, (match, offset) => {
-        if (offset > lastIndex) {
-          frag.appendChild(document.createTextNode(text.slice(lastIndex, offset)));
-        }
+  for (const node of textNodes) {
+    const text = node.nodeValue;
+    const frag = document.createDocumentFragment();
+    let lastIndex = 0;
 
-        const mark = document.createElement("mark");
-        mark.className = "job-filter-highlight";
-        mark.textContent = match;
-        frag.appendChild(mark);
-
-        lastIndex = offset + match.length;
-        return match;
-      });
-
-      if (lastIndex < text.length) {
-        frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+    text.replace(regex, (match, offset) => {
+      if (offset > lastIndex) {
+        frag.appendChild(document.createTextNode(text.slice(lastIndex, offset)));
       }
 
-      node.parentNode?.replaceChild(frag, node);
+      const mark = document.createElement("mark");
+      mark.className = "job-filter-highlight";
+      mark.textContent = match;
+      frag.appendChild(mark);
+
+      lastIndex = offset + match.length;
+      return match;
+    });
+
+    if (lastIndex < text.length) {
+      frag.appendChild(document.createTextNode(text.slice(lastIndex)));
     }
-  });
+
+    node.parentNode?.replaceChild(frag, node);
+  }
 }
 
-function scanPage() {
-  if (!currentConfig.enabled) return;
+async function scanPage({ forcedByUser = false } = {}) {
+  if (!currentConfig.enabled && !forcedByUser) return;
 
   const text = getPageText();
   if (!text) return;
@@ -729,43 +904,107 @@ function scanPage() {
     }
   });
 
-  preservePageScroll(() => {
+  if (currentConfig.highlightMatches && (currentPageIntent.likelyJobPage || overlayVisible || forcedByUser)) {
     highlightMatchesInDom();
-    renderOverlay();
-  });
+  } else {
+    clearHighlights();
+  }
+
+  if (overlayVisible) renderOverlay();
 }
 
-function scheduleScan() {
-  clearTimeout(rescanTimer);
-  rescanTimer = setTimeout(scanPage, 300);
+async function evaluatePageState({ allowAutoOpen = false, forcedByUser = false } = {}) {
+  const previousIntent = currentPageIntent;
+  currentPageIntent = detectPageIntent();
+
+  const shouldAutoOpen = currentConfig.enabled && currentPageIntent.autoOpen;
+
+  if (allowAutoOpen && shouldAutoOpen && !overlayVisible) {
+    overlayVisible = true;
+    overlayMode = "auto";
+    setOverlayStatus(`Detected a likely job page. ${currentPageIntent.reason}`);
+  }
+
+  if (!currentConfig.enabled) {
+    clearHighlights();
+    if (overlayMode === "auto") closeOverlay();
+    return;
+  }
+
+  if (overlayVisible && overlayMode === "manual") {
+    await scanPage({ forcedByUser: true });
+    return;
+  }
+
+  if (shouldAutoOpen && overlayVisible && overlayMode === "auto") {
+    if (previousIntent.reason !== currentPageIntent.reason) {
+      setOverlayStatus(`Detected a likely job page. ${currentPageIntent.reason}`);
+    }
+    await scanPage();
+    return;
+  }
+
+  if (shouldAutoOpen && !overlayVisible) {
+    if (allowAutoOpen || previousIntent.autoOpen !== currentPageIntent.autoOpen || lastKnownUrl !== location.href) {
+      overlayVisible = true;
+      overlayMode = "auto";
+      setOverlayStatus(`Detected a likely job page. ${currentPageIntent.reason}`);
+      await scanPage();
+      return;
+    }
+  }
+
+  if (!shouldAutoOpen && overlayMode === "auto") {
+    closeOverlay();
+  }
+
+  if ((currentPageIntent.likelyJobPage || forcedByUser) && overlayVisible) {
+    await scanPage({ forcedByUser });
+  } else if (!currentPageIntent.likelyJobPage && !overlayVisible) {
+    clearHighlights();
+  }
+}
+
+function scheduleEvaluation() {
+  clearTimeout(mutationDebounce);
+  mutationDebounce = setTimeout(() => {
+    void evaluatePageState({ allowAutoOpen: true });
+  }, currentConfig.autoRescanMs);
+}
+
+function mutationTouchesOverlayOnly(mutations) {
+  return mutations.every((mutation) => {
+    const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
+    if (target && target.closest("#job-filter-overlay")) return true;
+
+    const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
+    return nodes.every((node) => {
+      if (!(node instanceof Element)) return true;
+      if (node.id === "job-filter-overlay") return true;
+      if (node.closest && node.closest("#job-filter-overlay")) return true;
+      if (node.matches?.("mark.job-filter-highlight")) return true;
+      return false;
+    });
+  });
 }
 
 function setupMutationObserver() {
-  const observer = new MutationObserver((mutations) => {
-    if (suppressObserverMutations) return;
+  if (mutationObserver) mutationObserver.disconnect();
 
-    const hasNonOverlayMutation = mutations.some((mutation) => {
-      const target = mutation.target instanceof Node ? mutation.target : null;
-      if (!target) return true;
+  mutationObserver = new MutationObserver((mutations) => {
+    if (isSuppressedMutationWindow()) return;
+    if (mutationTouchesOverlayOnly(mutations)) return;
 
-      if (target.nodeType === Node.ELEMENT_NODE && target.id === "job-filter-overlay") return false;
+    const urlChanged = location.href !== lastKnownUrl;
+    if (urlChanged) {
+      lastKnownUrl = location.href;
+      loadStoredMatch();
+    }
 
-      const element = target.nodeType === Node.ELEMENT_NODE ? target : target.parentElement;
-      if (!element) return true;
-
-      if (element.closest?.("#job-filter-overlay")) return false;
-      return true;
-    });
-
-    if (!hasNonOverlayMutation) return;
-
-    clearTimeout(mutationDebounce);
-    mutationDebounce = setTimeout(() => {
-      scheduleScan();
-    }, currentConfig.autoRescanMs);
+    scheduleEvaluation();
   });
 
-  observer.observe(document.documentElement || document.body, {
+  mutationObserver.observe(document.documentElement || document.body, {
     childList: true,
     subtree: true
   });
@@ -829,104 +1068,111 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
     if (changes.geminiApiKey) {
       window.__joblensGeminiApiKey = changes.geminiApiKey.newValue || "";
-      if (currentOverlayTab === "profile" && !overlayMinimized && !overlayDismissedForThisPage) {
-        renderOverlay();
-      }
+      if (currentOverlayTab === "profile" && overlayVisible) renderOverlay();
     }
 
-    if (changes.showOverlay && changes.showOverlay.newValue === false) {
-      overlayDismissedForThisPage = false;
-      overlayMinimized = false;
-      removeOverlay();
+    if (changes.highlightMatches && !currentConfig.highlightMatches) {
+      clearHighlights();
     }
 
-    if (changes.showOverlay && changes.showOverlay.newValue === true) {
-      overlayDismissedForThisPage = false;
-      overlayMinimized = false;
+    if (changes.showOverlay && changes.showOverlay.newValue === false && overlayMode === "auto") {
+      closeOverlay();
     }
 
-    if (changed) scheduleScan();
+    if (changed) {
+      void evaluatePageState({ allowAutoOpen: true });
+    }
   }
 
   if (area === "local" && changes.atsResultsByUrl) {
     const currentUrl = getCurrentPageUrl();
     const newMap = changes.atsResultsByUrl.newValue || {};
     latestMatchResult = newMap[currentUrl]?.result || null;
-    loadHistoryCount().then(scheduleScan);
+    loadHistoryCount().then(() => {
+      if (overlayVisible) renderOverlay();
+    });
   }
 
   if (area === "local" && changes.parsedResume) {
     parsedResume = changes.parsedResume.newValue || null;
-    if (!overlayDismissedForThisPage && !overlayMinimized) renderOverlay();
+    if (overlayVisible) renderOverlay();
   }
 
   if (area === "local" && changes.atsHistory) {
     historyCount = Array.isArray(changes.atsHistory.newValue) ? changes.atsHistory.newValue.length : 0;
-    if (!overlayDismissedForThisPage && !overlayMinimized) renderOverlay();
+    if (overlayVisible) renderOverlay();
   }
 });
 
+async function openOverlay(mode = "manual") {
+  overlayVisible = true;
+  overlayMode = mode;
+  currentOverlayTab = "result";
+
+  if (mode === "auto") {
+    setOverlayStatus(`Detected a likely job page. ${currentPageIntent.reason}`);
+    renderOverlay();
+    await scanPage();
+  } else {
+    setOverlayStatus(currentPageIntent.likelyJobPage ? `Manual scan opened. ${currentPageIntent.reason}` : "Manual scan opened on a page that was not auto-detected as a job posting.");
+    renderOverlay();
+    await scanPage({ forcedByUser: true });
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "ATS_MATCH_RESULT_UPDATED") {
-    const payloadUrl = message.payload?.pageUrl || "";
-    if (payloadUrl === getCurrentPageUrl()) {
-      latestMatchResult = message.payload?.matchResult || null;
-      currentOverlayTab = "result";
-      overlayDismissedForThisPage = false;
-      overlayMinimized = false;
-      setOverlayStatus("Match complete.");
-      loadHistoryCount().then(renderOverlay);
-    }
-  }
-
-  if (message.type === "TOGGLE_OVERLAY") {
-    if (!currentConfig.showOverlay) {
-      currentConfig.showOverlay = true;
-      chrome.storage.sync.set({ showOverlay: true });
+  (async () => {
+    if (message.type === "ATS_MATCH_RESULT_UPDATED") {
+      const payloadUrl = message.payload?.pageUrl || "";
+      if (payloadUrl === getCurrentPageUrl()) {
+        latestMatchResult = message.payload?.matchResult || null;
+        currentOverlayTab = "result";
+        setOverlayStatus("Match complete.");
+        await loadHistoryCount();
+        if (overlayVisible) renderOverlay();
+      }
+      sendResponse?.({ ok: true });
+      return;
     }
 
-    if (overlayDismissedForThisPage || overlayMinimized) {
-      overlayDismissedForThisPage = false;
-      overlayMinimized = false;
-    } else {
-      overlayDismissedForThisPage = false;
-      overlayMinimized = true;
+    if (["TOGGLE_OVERLAY", "OPEN_OVERLAY", "HIDE_OVERLAY", "MINIMIZE_OVERLAY", "RESTORE_OVERLAY"].includes(message.type)) {
+      currentPageIntent = detectPageIntent();
     }
 
-    renderOverlay();
-    sendResponse?.({ ok: true, minimized: overlayMinimized, hidden: overlayDismissedForThisPage });
-    return true;
-  }
+    if (message.type === "TOGGLE_OVERLAY") {
+      if (overlayVisible) {
+        closeOverlay();
+        sendResponse?.({ ok: true, visible: false });
+        return;
+      }
 
-  if (message.type === "OPEN_OVERLAY") {
-    overlayDismissedForThisPage = false;
-    overlayMinimized = false;
-    renderOverlay();
-    sendResponse?.({ ok: true });
-    return true;
-  }
+      const mode = currentPageIntent.autoOpen ? "auto" : "manual";
+      await openOverlay(mode);
+      sendResponse?.({ ok: true, visible: true, mode });
+      return;
+    }
 
-  if (message.type === "HIDE_OVERLAY") {
-    overlayDismissedForThisPage = false;
-    overlayMinimized = true;
-    renderOverlay();
-    sendResponse?.({ ok: true });
-    return true;
-  }
+    if (message.type === "OPEN_OVERLAY") {
+      const mode = message.payload?.mode || (currentPageIntent.autoOpen ? "auto" : "manual");
+      await openOverlay(mode);
+      sendResponse?.({ ok: true, visible: true, mode });
+      return;
+    }
 
-  if (message.type === "MINIMIZE_OVERLAY") {
-    overlayDismissedForThisPage = false;
-    overlayMinimized = true;
-    renderOverlay();
-    sendResponse?.({ ok: true });
-    return true;
-  }
+    if (message.type === "HIDE_OVERLAY" || message.type === "MINIMIZE_OVERLAY") {
+      closeOverlay();
+      sendResponse?.({ ok: true, visible: false });
+      return;
+    }
 
-  if (message.type === "RESTORE_OVERLAY") {
-    restoreOverlay();
-    sendResponse?.({ ok: true });
-    return true;
-  }
+    if (message.type === "RESTORE_OVERLAY") {
+      const mode = currentPageIntent.autoOpen ? "auto" : "manual";
+      await openOverlay(mode);
+      sendResponse?.({ ok: true, visible: true, mode });
+    }
+  })();
+
+  return true;
 });
 
 (async function init() {
@@ -935,20 +1181,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   await loadParsedResume();
   await loadHistoryCount();
 
-  overlayDismissedForThisPage = false;
-  overlayMinimized = false;
   currentOverlayTab = "result";
   setOverlayStatus("Idle.");
+  lastKnownUrl = location.href;
 
-  if (!currentConfig.enabled) return;
+  const boot = async () => {
+    currentPageIntent = detectPageIntent();
+    if (currentConfig.enabled && currentPageIntent.autoOpen) {
+      await openOverlay("auto");
+    } else {
+      clearHighlights();
+    }
+    setupMutationObserver();
+  };
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
-      scanPage();
-      setupMutationObserver();
-    });
+      void boot();
+    }, { once: true });
   } else {
-    scanPage();
-    setupMutationObserver();
+    await boot();
   }
 })();

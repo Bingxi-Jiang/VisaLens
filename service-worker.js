@@ -21,15 +21,14 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-
-chrome.action.onClicked.addListener((tab) => {
+chrome.action.onClicked.addListener(async (tab) => {
   if (!tab?.id) return;
 
-  chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_OVERLAY" }, () => {
-    if (chrome.runtime.lastError) {
-      console.warn("Failed to toggle JobLens overlay:", chrome.runtime.lastError.message);
-    }
-  });
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_OVERLAY" });
+  } catch (error) {
+    console.warn("Failed to toggle VisaLens overlay:", error);
+  }
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -112,8 +111,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
             const filtered = atsHistory.filter((item) => item.url !== pageUrl);
             filtered.unshift(newEntry);
-
-            // 保留最近 500 条
             const trimmed = filtered.slice(0, 500);
 
             await chrome.storage.local.set({
@@ -179,13 +176,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case "SUMMARIZE_ATS_HISTORY": {
           const data = await chrome.storage.local.get(["atsHistory"]);
           const atsHistory = Array.isArray(data.atsHistory) ? data.atsHistory : [];
-
           const summary = summarizeAtsHistory(atsHistory);
 
-          sendResponse({
-            ok: true,
-            summary
-          });
+          sendResponse({ ok: true, summary });
           break;
         }
 
@@ -270,65 +263,32 @@ function summarizeAtsHistory(history) {
       }
     }
 
-    if (scan.authorization?.matched) {
-      ruleStats.authorizationMentioned += 1;
-    }
-    if (scan.authorization?.blocker) {
-      ruleStats.authorizationBlocker += 1;
-    }
-
-    const degreeLower = degreeTerms.toLowerCase();
-    if (
-      /\bbachelor\b|\bbachelor's\b|\bbachelor of science\b|\bbachelor of arts\b|\bbs\b|\bb\.s\.\b|\bba\b|\bb\.a\.\b/i.test(degreeLower)
-    ) {
-      ruleStats.bachelorMentioned += 1;
-    }
-    if (
-      /\bmaster\b|\bmaster's\b|\bmaster of science\b|\bmaster of arts\b|\bms\b|\bm\.s\.\b|\bma\b|\bm\.a\.\b|\bmeng\b|\bm\.eng\.\b|\bmba\b/i.test(degreeLower)
-    ) {
-      ruleStats.masterMentioned += 1;
-    }
-    if (
-      /\bphd\b|\bph\.d\.\b|\bdoctorate\b|\bdoctoral\b|\bdoctor of philosophy\b/i.test(degreeLower)
-    ) {
-      ruleStats.phdMentioned += 1;
-    }
+    if (scan.authorization?.matched) ruleStats.authorizationMentioned += 1;
+    if (scan.authorization?.blocker) ruleStats.authorizationBlocker += 1;
+    if (/\bbachelor/i.test(combinedText)) ruleStats.bachelorMentioned += 1;
+    if (/\bmaster/i.test(combinedText)) ruleStats.masterMentioned += 1;
+    if (/\bph\.?d/i.test(combinedText)) ruleStats.phdMentioned += 1;
   }
 
-  const lines = [];
-  lines.push(`Processed ${total} ATS record${total === 1 ? "" : "s"}.`);
+  const topKeywords = Object.entries(keywordStats)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .filter(([, count]) => count > 0)
+    .map(([label, count]) => `${label} (${count})`);
 
-  for (const [label, count] of Object.entries(keywordStats)) {
-    if (count > 0) {
-      lines.push(`${label} appeared in ${count}/${total} jobs (${percent(count, total)}%).`);
-    }
-  }
-
-  lines.push(
-    `Sponsorship-related terms appeared in ${ruleStats.authorizationMentioned}/${total} jobs (${percent(ruleStats.authorizationMentioned, total)}%).`
-  );
-  lines.push(
-    `Potential authorization blockers appeared in ${ruleStats.authorizationBlocker}/${total} jobs (${percent(ruleStats.authorizationBlocker, total)}%).`
-  );
-  lines.push(
-    `Bachelor-related terms appeared in ${ruleStats.bachelorMentioned}/${total} jobs (${percent(ruleStats.bachelorMentioned, total)}%).`
-  );
-  lines.push(
-    `Master-related terms appeared in ${ruleStats.masterMentioned}/${total} jobs (${percent(ruleStats.masterMentioned, total)}%).`
-  );
-  lines.push(
-    `PhD-related terms appeared in ${ruleStats.phdMentioned}/${total} jobs (${percent(ruleStats.phdMentioned, total)}%).`
-  );
+  const summaryText = [
+    `Scanned ${total} job pages.`,
+    ruleStats.authorizationMentioned
+      ? `Authorization language appeared in ${ruleStats.authorizationMentioned} postings, with ${ruleStats.authorizationBlocker} likely blockers.`
+      : "No authorization language detected yet.",
+    topKeywords.length ? `Top recurring skills/signals: ${topKeywords.join(", ")}.` : "No recurring skill signals yet.",
+    `Degree mentions — bachelor's: ${ruleStats.bachelorMentioned}, master's: ${ruleStats.masterMentioned}, PhD: ${ruleStats.phdMentioned}.`
+  ].join(" ");
 
   return {
     totalRecords: total,
     keywordStats,
     ruleStats,
-    summaryText: lines.join("\n")
+    summaryText
   };
-}
-
-function percent(count, total) {
-  if (!total) return 0;
-  return Math.round((count / total) * 100);
 }
