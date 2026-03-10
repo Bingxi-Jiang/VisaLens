@@ -105,44 +105,6 @@ That means:
 
 ---
 
-## 🧩 Core idea
-
-VisaLens is built around two questions:
-
-1. **Am I a match for this job?**
-2. **Can I realistically apply as an international student?**
-
-Most tools only answer the first.
-VisaLens is designed to help answer both.
-
----
-
-## ⚙️ How it works
-
-- `content.js` → page detection, on-page overlay, highlighting, ATS scan UI
-- `content.css` → overlay styling
-- `service-worker.js` → toolbar click handling, storage, Gemini calls
-- `gemini.js` → resume parsing + ATS matching
-- `prompts.js` → prompt templates
-
----
-
-## 🧪 Detection strategy
-
-VisaLens does **not** rely on a giant hardcoded job database.
-
-Instead, it uses a hybrid approach:
-
-- ATS / recruiting platform domain rules
-- URL path heuristics
-- `JobPosting` schema detection
-- job-related keyword scoring
-- negative rules for obvious non-job sites
-
-This makes it easier to support both major ATS platforms and custom company careers pages.
-
----
-
 ## 🛠 Installation
 
 ```bash
@@ -170,17 +132,6 @@ Then:
 
 ---
 
-## 👥 Who this is for
-
-VisaLens is especially useful for:
-
-- international students in the U.S.
-- F-1 / CPT / OPT applicants
-- people screening jobs for sponsorship constraints
-- job seekers tired of manually searching every posting
-
----
-
 ## 🔮 Future ideas
 
 - smarter sponsorship classification
@@ -190,9 +141,3 @@ VisaLens is especially useful for:
 - optional profile rename / duplicate / export actions
 - exportable job tracking
 - autofill and application workflow helpers
-
----
-
-## 💬 Motivation in one line
-
-**VisaLens helps international students understand not only whether they fit a job — but whether they can actually apply.**
